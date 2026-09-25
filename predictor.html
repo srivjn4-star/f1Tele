@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 Telemetry — Predictor</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <script src="js/pages/predictor.js" type="module"></script>
+
+    <header class="site-header">
+        <div class="wordmark">
+            <span class="wordmark-f1">F1</span><span class="wordmark-rest">TELEMETRY</span>
+        </div>
+        <nav class="main-nav">
+            <a href="index.html" class="main-nav__link">Home</a>
+            <a href="comparison.html" class="main-nav__link">Comparison</a>
+            <a href="predictor.html" class="main-nav__link main-nav__link--active">Predictor</a>
+        </nav>
+        <p class="subhead">Race winner prediction</p>
+    </header>
+
+    <div class="sector-rule" aria-hidden="true"></div>
+
+    <main>
+        <section class="predictor-section">
+            <div class="section-label">
+                <span class="section-index">00</span>
+                <h2>Race winner predictor</h2>
+                <h2>Select Grand Prix</h2>
+            </div>
+
+            <div class="predictor-panel">            
+                <div class="predictor-selector-bar">
+                    <div class="driver-select">
+                        <label for="predictorYearSelect">YEAR</label>
+                        <select id="predictorYearSelect" aria-label="Select Season Year"></select>
+                    </div>
+                    <div class="driver-select">
+                        <label for="predictorRaceSelect">GRAND PRIX</label>
+                        <select id="predictorRaceSelect" aria-label="Select Grand Prix"></select>
+                    </div>
+                    <span id="predictorStatusBadge" class="weather-pill" style="margin-left: auto;">
+                        <span class="weather-pill__label">MODEL</span>
+                        <span id="predictorStatusText">Loading...</span>
+                    </span>
+                </div>
+
+                <div id="raceMetaCard" class="predictor-meta-card" style="display: none;">
+                    <div class="predictor-meta-info">
+                        <h3 id="raceTitle">Bahrain Grand Prix</h3>
+                        <p id="raceCircuit" class="predictor-meta-details">Sakhir International Circuit</p>
+                    </div>
+                    <div id="raceWeather" class="predictor-weather-pills">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="sector-rule sector-rule--thin" aria-hidden="true"></div>
+
+        <section class="standings-section">
+            <div class="section-label">
+                <span class="section-index">01</span>
+                <h2>Predicted Standings</h2>
+            </div>
+
+            <div id="podiumGrid" class="podium-grid">
+                <!-- P1, P2, P3 cards populated dynamically -->
+            </div>
+
+            <div class="table-scroll">
+                <table id="standingsTable">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left;">POS</th>
+                            <th style="text-align: left;">DRIVER</th>
+                            <th style="text-align: left;">TEAM</th>
+                            <th>SCORE</th>
+                            <th>ACTUAL</th>
+                            <th>ACCURACY</th>
+                            <th>QUALI DELTA</th>
+                            <th>DRIVER PTS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="standingsTableBody">
+                        <!-- Populated dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
