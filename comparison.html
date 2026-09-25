@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 Telemetry — Comparison</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    <script src="js/pages/comparison.js" type="module"></script>
+
+    <header class="site-header">
+        <div class="wordmark">
+            <span class="wordmark-f1">F1</span><span class="wordmark-rest">TELEMETRY</span>
+        </div>
+        <nav class="main-nav">
+            <a href="index.html" class="main-nav__link">Home</a>
+            <a href="comparison.html" class="main-nav__link main-nav__link--active">Comparison</a>
+            <a href="predictor.html" class="main-nav__link">Predictor</a>
+        </nav>
+        <p id="sessionSubhead" class="subhead">Select a year and circuit below</p>
+    </header>
+
+    <div class="sector-rule" aria-hidden="true"></div>
+
+    <main>
+        <section class="selector-section">
+            <div class="section-label">
+                <span class="section-index">00</span>
+                <h2>Choose session &amp; drivers</h2>
+            </div>
+
+            <div class="session-select-bar">
+                <div class="driver-select">
+                    <label for="yearSelect">YEAR</label>
+                    <select id="yearSelect"></select>
+                </div>
+                <div class="driver-select">
+                    <label for="circuitSelect">CIRCUIT</label>
+                    <select id="circuitSelect"></select>
+                </div>
+            </div>
+
+            <div class="driver-select-bar">
+                <div class="driver-select">
+                    <label for="driverASelect">DRIVER A</label>
+                    <select id="driverASelect"></select>
+                </div>
+                <div class="driver-select">
+                    <label for="driverBSelect">DRIVER B</label>
+                    <select id="driverBSelect"></select>
+                </div>
+                <button id="loadComparisonBtn" disabled>Load Comparison</button>
+                <span id="driverSelectWarning" class="select-warning"></span>
+            </div>
+        </section>
+
+        <div class="sector-rule sector-rule--thin" aria-hidden="true"></div>
+
+        <section class="chart-section">
+            <div class="section-label">
+                <span class="section-index">01</span>
+                <h2>Corner-by-corner speed</h2>
+            </div>
+
+            <div id="circuitImageContainer" class="circuit-image-wrap"></div>
+
+            <div class="chart-track-row">
+                <div class="chart-wrap">
+                    <div class="lap-picker">
+                        <label for="lapSelect">LAP</label>
+                        <select id="lapSelect"></select>
+                    </div>
+                    <canvas id="speedChart"></canvas>
+                </div>
+
+                <div id="trackContainer" class="track-wrap"></div>
+            </div>
+
+            <div class="readout-row">
+                <div id="driverAReadout" class="driver-readout-card"></div>
+                <div id="driverBReadout" class="driver-readout-card"></div>
+            </div>
+        </section>
+
+        <div class="sector-rule sector-rule--thin" aria-hidden="true"></div>
+
+        <section class="laps-section">
+            <div class="section-label">
+                <span class="section-index">02</span>
+                <h2>Lap data</h2>
+            </div>
+
+            <div class="tables-grid">
+                <div class="driver-table">
+                    <h3><span class="driver-dot" id="driverADot"></span><span id="driverATableName">Driver A</span></h3>
+                    <div class="table-scroll">
+                        <table id="driverATable"></table>
+                    </div>
+                </div>
+
+                <div class="driver-table">
+                    <h3><span class="driver-dot" id="driverBDot"></span><span id="driverBTableName">Driver B</span></h3>
+                    <div class="table-scroll">
+                        <table id="driverBTable"></table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="alertDock" class="alert-dock" aria-live="polite">
+        <div id="sessionNotStartedAlert" class="alert-cube alert-cube--not-started" hidden>
+            <p class="alert-cube__text">This session has not started yet. Telemetry will be available once the race begins.</p>
+            <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
+        </div>
+        <div id="sessionInProgressAlert" class="alert-cube alert-cube--in-progress" hidden>
+            <p class="alert-cube__text">Session in progress — live data may require OpenF1 authentication during race weekends.</p>
+            <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
+        </div>
+        <div id="sessionFinishedAlert" class="alert-cube alert-cube--finished" hidden>
+            <p class="alert-cube__text">Session finished — full historical telemetry is available for this race.</p>
+            <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
+        </div>
+    </div>
+</body>
+</html>
