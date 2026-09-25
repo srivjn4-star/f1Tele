@@ -10,7 +10,8 @@ __pycache__/
 .DS_Store
 js/.DS_Store
 
-#venv
+#cache
+predictor/cache/
 
 # Distribution / packaging
 .Python

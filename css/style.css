@@ -135,6 +135,202 @@ body {
     letter-spacing: 0.02em;
 }
 
+/* ---------- Predictor page ---------- */
+.predictor-panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    padding: 32px 28px;
+    max-width: 640px;
+}
+
+.predictor-placeholder {
+    font-size: 0.95rem;
+    line-height: 1.55;
+    margin: 0 0 16px;
+}
+
+.predictor-hint {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin: 0;
+}
+
+.predictor-hint code {
+    color: var(--amber);
+    font-size: 0.75rem;
+}
+
+/* Predictor interactive elements */
+.predictor-selector-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+}
+
+.predictor-meta-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.predictor-meta-info h3 {
+    margin: 0 0 6px;
+    font-family: var(--font-display);
+    font-style: italic;
+    text-transform: uppercase;
+    font-size: 1.35rem;
+    letter-spacing: 0.04em;
+    color: var(--text);
+}
+
+.predictor-meta-details {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    margin: 0;
+}
+
+.predictor-weather-pills {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.weather-pill {
+    background: var(--bg);
+    border: 1px solid var(--panel-line);
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.weather-pill__label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+}
+
+/* Podium Cards */
+.podium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+@media (max-width: 768px) {
+    .podium-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.podium-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.podium-card:hover {
+    transform: translateY(-2px);
+}
+
+.podium-card--p1 {
+    border-top: 4px solid #ffd700;
+}
+
+.podium-card--p2 {
+    border-top: 4px solid #c0c0c0;
+}
+
+.podium-card--p3 {
+    border-top: 4px solid #cd7f32;
+}
+
+.podium-card__rank {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-style: italic;
+    font-size: 2rem;
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+.podium-card--p1 .podium-card__rank { color: #ffd700; }
+.podium-card--p2 .podium-card__rank { color: #c0c0c0; }
+.podium-card--p3 .podium-card__rank { color: #cd7f32; }
+
+.podium-card__name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0 0 4px;
+    color: var(--text);
+}
+
+.podium-card__team {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 12px;
+}
+
+.podium-card__score {
+    font-size: 0.8rem;
+    color: var(--amber);
+}
+
+.pos-tag {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 2px;
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.pos-tag--p1 { background: rgba(255, 215, 0, 0.2); color: #ffd700; }
+.pos-tag--p2 { background: rgba(192, 192, 192, 0.2); color: #c0c0c0; }
+.pos-tag--p3 { background: rgba(205, 127, 50, 0.2); color: #cd7f32; }
+.pos-tag--default { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+
+.delta-tag {
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 2px;
+}
+
+.delta-tag--exact {
+    color: #4cd964;
+    font-weight: 700;
+}
+
+.delta-tag--close {
+    color: var(--amber);
+}
+
+.delta-tag--far {
+    color: var(--text-dim);
+}
+
 /* ---------- Sector rule (signature element) ---------- */
 .sector-rule {
     height: 4px;
