@@ -219,6 +219,149 @@ def fetch_and_calculate_race_features(
     return race_df, metadata
 
 
+def fetch_and_calculate_future_race_features(
+    year: int,
+    round_num_or_name: Any,
+    csv_history_path: str = "predictor/data/driver_results_final.csv"
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Dynamically fetches an upcoming race using Qualifying data, computes
+    aggregates (weather averages from Q, relative quali time, championship points,
+    historical EWMA for constructors and drivers), and prepares the feature matrix.
+    Finish position is left blank (NaN).
+    """
+    enable_fastf1_cache()
+    print(f"Fetching future race data from FastF1 for {year} {round_num_or_name}...")
+
+    event = fastf1.get_event(year, round_num_or_name)
+    quali_session = event.get_session('Q')
+    quali_session.load()
+
+    # Weather aggregates from Quali
+    temp_weather = [quali_session.weather_data]
+    weather = process_weather_data(temp_weather)[0]
+    air_temp, rainfall, wind_speed = weather[0], weather[1], weather[2]
+
+    # Qualifying relative times
+    quali_res = quali_session.results
+    fastest_time = None
+    quali_times = {}
+
+    for _, row in quali_res.iterrows():
+        min_time = find_minimum_time(row.get('Q1'), row.get('Q2'), row.get('Q3'))
+        quali_times[row['DriverId']] = min_time
+        if min_time is not None and not pd.isna(min_time):
+            if fastest_time is None or min_time < fastest_time:
+                fastest_time = min_time
+
+    # Calculate relative timedelta in milliseconds
+    max_ms = 9960000.0  # fallback delta for missing times
+    quali_delta_ms = {}
+    for driver_id, t in quali_times.items():
+        if t is not None and fastest_time is not None and not pd.isna(t):
+            delta = t - fastest_time
+            ms = (delta / datetime.timedelta(microseconds=1)) / 1000.0
+            quali_delta_ms[driver_id] = float(ms)
+        else:
+            quali_delta_ms[driver_id] = max_ms
+
+    # Ergast standings (use previous round if possible, or just current)
+    ergast = Ergast()
+    round_val = int(event['RoundNumber'])
+    driver_points_map = {}
+    constructor_points_map = {}
+
+    try:
+        # Use round_val - 1 because current round hasn't happened
+        d_standings = ergast.get_driver_standings(season=year, round=max(1, round_val - 1)).content[0]
+        for _, r in d_standings.iterrows():
+            driver_points_map[r['driverId']] = float(r['points'])
+    except Exception:
+        pass
+
+    try:
+        c_standings = ergast.get_constructor_standings(season=year, round=max(1, round_val - 1)).content[0]
+        for _, r in c_standings.iterrows():
+            constructor_points_map[r['constructorId']] = float(r['points'])
+    except Exception:
+        pass
+
+    # Historical EWMA from history dataset
+    history_df = pd.read_csv(csv_history_path)
+    prior_races = history_df[
+        (history_df['Year'] < year) |
+        ((history_df['Year'] == year) & (history_df['Round'] < round_val))
+    ]
+
+    rows = []
+
+    for _, driver_row in quali_res.iterrows():
+        driver_id = driver_row['DriverId']
+        team_id = driver_row['TeamId']
+
+        # Historical constructor EWMA
+        team_history = prior_races[prior_races['TeamId'] == team_id]
+        if not team_history.empty:
+            last_entry = team_history.iloc[-1]
+            prev_ewma = float(last_entry.get('TeamAverageFinishEWMA', 20.0))
+            last_pos = float(last_entry.get('Position', 20.0))
+            constr_ewma = calc_EWMA(prev_ewma, 0.56, last_pos)
+        else:
+            constr_ewma = 20.0
+
+        # Historical driver EWMA
+        driver_history = prior_races[prior_races['DriverId'] == driver_id]
+        if not driver_history.empty:
+            last_entry = driver_history.iloc[-1]
+            prev_ewma = float(last_entry.get('EWMAFinishPosition', 20.0))
+            last_pos = float(last_entry.get('Position', 20.0))
+            driver_ewma = calc_EWMA(prev_ewma, 0.56, last_pos)
+        else:
+            driver_ewma = 20.0
+
+        d_pts = driver_points_map.get(driver_id, 0.0)
+        c_pts = constructor_points_map.get(team_id, 0.0)
+        q_time = quali_delta_ms.get(driver_id, max_ms)
+
+        rows.append({
+            'DriverId': driver_id,
+            'FullName': driver_row.get('FullName', driver_id),
+            'Abbreviation': driver_row.get('Abbreviation', ''),
+            'DriverNumber': driver_row.get('DriverNumber', 0),
+            'TeamId': team_id,
+            'Position': np.nan,  # Finish position left blank
+            'air_temp': air_temp,
+            'rainfall': rainfall,
+            'wind_speed': wind_speed,
+            'quali_relative_time': q_time,
+            'driver_points': d_pts,
+            'constructor_points': c_pts,
+            'constructors_ewma': constr_ewma,
+            'driver_ewma': driver_ewma
+        })
+
+    race_df = pd.DataFrame(rows)
+    
+    # The identifier date is found in the quali data frame
+    session_key = getattr(quali_session, 'session_info', {}).get('Key', 0)
+    date = getattr(quali_session, 'date', None)
+    if date is None:
+        try:
+            date = quali_session.session_info['StartDate']
+        except Exception:
+            date = datetime.datetime.now()
+            
+    metadata = {
+        'year': year,
+        'round': round_val,
+        'race_name': str(event.get('EventName', 'Grand Prix')),
+        'circuit': str(event.get('Location', '')),
+        'session_key': int(session_key) if session_key else int(date.timestamp()),
+        'source': 'FastF1 Live Fetch (Quali Only)'
+    }
+    return race_df, metadata
+
+
 def get_race_data(
     year: Optional[int] = None,
     round_num: Optional[int] = None,
@@ -363,6 +506,31 @@ def export_predictions_json(
             })
         except Exception as e:
             print(f"Warning: could not export predictions for session {race_meta['session_key']}: {e}")
+
+    # --- ADD NEW FUTURE RACE ---
+    try:
+        current_year = datetime.datetime.now().year
+        future_race_df, future_meta = fetch_and_calculate_future_race_features(current_year, 'Azerbaijan', csv_path)
+        ranked_df = predict_session_standings(ranker, future_race_df)
+        standings = format_standings_display(ranked_df)
+
+        export_data['races'].append({
+            'year': future_meta['year'],
+            'round': future_meta['round'],
+            'race_name': future_meta['race_name'],
+            'circuit': future_meta['circuit'],
+            'session_key': future_meta['session_key'],
+            'weather': {
+                'air_temp': round(float(future_race_df['air_temp'].iloc[0]), 1),
+                'rainfall_pct': round(float(future_race_df['rainfall'].iloc[0]) * 100, 1),
+                'wind_speed': round(float(future_race_df['wind_speed'].iloc[0]), 1)
+            },
+            'standings': standings
+        })
+        print(f"Added future race: {future_meta['race_name']}")
+    except Exception as e:
+        print(f"Warning: could not export predictions for future race: {e}")
+    # -----------------------------
 
     # Write to predictor/predictions.json
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
