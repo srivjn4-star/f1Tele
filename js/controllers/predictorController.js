@@ -7,7 +7,7 @@
 // 1. Fetch or load model inputs (driver stats, circuit, weather, etc.)
 // 2. Call your Python backend or pre-computed predictions JSON
 // 3. Update the predictor view DOM with results
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = 'https://f1tele.onrender.com';
 let allRacesData = [];
 let isLiveApi = false;
 
