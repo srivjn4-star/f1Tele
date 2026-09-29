@@ -548,3 +548,138 @@ def export_predictions_json(
 
     return export_data
 
+
+
+# --- NEW FUNCTIONS ADDED FOR FASTAPI INTEGRATION ---
+
+import logging
+logger = logging.getLogger(__name__)
+
+def cache_single_race_prediction(response_data: Dict[str, Any], output_path: str = "predictor/predictions.json", web_public_path: str = "predictions.json"):
+    """
+    Appends a single race prediction to the existing predictions.json without recalculating all races.
+    """
+    logger.info(f"Caching new race prediction for {response_data['metadata']['race_name']}")
+    try:
+        if os.path.exists(output_path):
+            with open(output_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {
+                'generated_at': datetime.datetime.now().isoformat(),
+                'model_type': 'XGBRanker (LambdaMART NDCG)',
+                'races': []
+            }
+
+        # Check if already exists, if so, replace
+        session_key = response_data['metadata']['session_key']
+        existing_idx = next((i for i, r in enumerate(data['races']) if r.get('session_key') == session_key), None)
+        
+        race_entry = {
+            'year': response_data['metadata']['year'],
+            'round': response_data['metadata']['round'],
+            'race_name': response_data['metadata']['race_name'],
+            'circuit': response_data['metadata']['circuit'],
+            'session_key': session_key,
+            'weather': response_data['weather'],
+            'standings': response_data['standings']
+        }
+
+        if existing_idx is not None:
+            data['races'][existing_idx] = race_entry
+        else:
+            data['races'].append(race_entry)
+
+        # Sort races ascending by year and round to maintain chronological order
+        data['races'].sort(key=lambda x: (x.get('year', 0), x.get('round', 0)), reverse=False)
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+            
+        try:
+            with open(web_public_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not mirror predictions to {web_public_path}: {e}")
+            
+    except Exception as e:
+        logger.error(f"Error caching single race: {e}")
+
+def check_and_predict_new_races(ranker: Optional[XGBRanker] = None, csv_path: str = "predictor/data/driver_results_final.csv"):
+    """
+    Checks FastF1 for new races that have had their qualifying session finished,
+    and automatically generates predictions for them if they aren't already cached.
+    Ensures order is preserved for EWMA calculation.
+    """
+    logger.info("Checking for new finished qualifying sessions...")
+    if ranker is None:
+        ranker = load_model("predictor/ranker_model.json")
+
+    current_year = datetime.datetime.now().year
+    enable_fastf1_cache()
+    
+    try:
+        schedule = fastf1.get_event_schedule(current_year)
+    except Exception as e:
+        logger.error(f"Could not fetch schedule from FastF1: {e}")
+        return
+
+    # Filter out testing and order chronologically
+    valid_events = schedule[schedule['EventFormat'] != 'testing'].sort_values('RoundNumber')
+    
+    # Load existing cached predictions by year and round to avoid re-predicting
+    cached_races = set()
+    try:
+        with open("predictor/predictions.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            cached_races = {(r.get('year'), r.get('round')) for r in data.get('races', [])}
+    except Exception:
+        pass
+
+    # Create a timezone-aware current time in UTC
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    
+    for _, event_row in valid_events.iterrows():
+        round_num = event_row['RoundNumber']
+        
+        # 1. Skip if already cached
+        if (current_year, round_num) in cached_races:
+            continue
+            
+        # 2. Find the Qualifying session date from the schedule row
+        q_date_utc = None
+        for i in range(1, 6):
+            if event_row.get(f'Session{i}') == 'Qualifying':
+                # FastF1 schedule dates are Pandas Timestamps
+                q_date_utc = event_row.get(f'Session{i}DateUtc')
+                break
+                
+        # 3. If Quali has passed, fetch the heavy event data and predict
+        if q_date_utc:
+            # Ensure it's tz-aware for comparison
+            if q_date_utc.tzinfo is None:
+                q_date_utc = q_date_utc.replace(tzinfo=datetime.timezone.utc)
+                
+            if q_date_utc < now_utc:
+                logger.info(f"Found new finished Quali for {current_year} Round {round_num}. Generating predictions...")
+                try:
+                    # Now we do the heavy fetching
+                    race_df, metadata = get_race_data(year=current_year, round_num=round_num, csv_path=csv_path)
+                    ranked_df = predict_session_standings(ranker, race_df)
+                    standings = format_standings_display(ranked_df)
+                    
+                    response_data = {
+                        "metadata": metadata,
+                        "weather": {
+                            "air_temp": round(float(race_df["air_temp"].iloc[0]), 1) if "air_temp" in race_df else None,
+                            "rainfall_pct": round(float(race_df["rainfall"].iloc[0]) * 100, 1) if "rainfall" in race_df else None,
+                            "wind_speed": round(float(race_df["wind_speed"].iloc[0]), 1) if "wind_speed" in race_df else None
+                        },
+                        "standings": standings
+                    }
+                    cache_single_race_prediction(response_data)
+                    cached_races.add((current_year, round_num))
+                    
+                except Exception as pred_err:
+                    logger.error(f"Failed to generate prediction for Round {round_num}: {pred_err}")
