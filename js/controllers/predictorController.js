@@ -22,14 +22,30 @@ export async function initPredictorPage() {
 
     try {
         if (!allRacesData || allRacesData.length === 0) {
-            const staticRes = await fetch('predictions.json');
-            if (!staticRes.ok) {
-                const fallbackRes = await fetch('predictor/predictions.json');
-                const fallbackData = await fallbackRes.json();
-                allRacesData = fallbackData.races || [];
-            } else {
-                const staticData = await staticRes.json();
-                allRacesData = staticData.races || [];
+            try {
+                // 1. Try to fetch from the live Python backend API
+                const apiRes = await fetch(`${API_BASE_URL}/api/predictions`);
+                if (apiRes.ok) {
+                    const apiData = await apiRes.json();
+                    allRacesData = apiData.races || [];
+                    isLiveApi = true;
+                } else {
+                    throw new Error("API returned non-200");
+                }
+            } catch (apiErr) {
+                console.log("Live API not reachable, falling back to static JSON.", apiErr);
+                isLiveApi = false;
+                
+                // 2. Fallback to static pre-computed JSON if backend is not running
+                const staticRes = await fetch('predictions.json');
+                if (!staticRes.ok) {
+                    const fallbackRes = await fetch('predictor/predictions.json');
+                    const fallbackData = await fallbackRes.json();
+                    allRacesData = fallbackData.races || [];
+                } else {
+                    const staticData = await staticRes.json();
+                    allRacesData = staticData.races || [];
+                }
             }
         }
 
