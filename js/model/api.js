@@ -14,6 +14,10 @@ export async function fetchWithRetry(url, label, retries = 3) {
         return await response.json();
     } catch (error) {
         console.log(`Failed to fetch ${label}:`, error);
+        // Bubble up 429 errors so the UI can show the rate limit alert
+        if (error.message && error.message.includes("429")) {
+            throw error;
+        }
         return null;
     }
 }
