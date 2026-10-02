@@ -83,7 +83,7 @@ app.add_middleware(
         "http://localhost:3000",
         "https://srivjn4-star.github.io/f1Tele/predictor.html",
         "http://127.0.0.1:3000/predictor.html",
-        "http://127.0.0.1:300",
+        "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000"
     ],
