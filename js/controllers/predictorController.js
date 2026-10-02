@@ -22,6 +22,9 @@ export async function initPredictorPage() {
 
     try {
         if (!allRacesData || allRacesData.length === 0) {
+            const loadingAlert = document.getElementById('backendLoadingAlert');
+            if (loadingAlert) loadingAlert.hidden = false;
+        
             try {
                 // 1. Try to fetch from the live Python backend API
                 const apiRes = await fetch(`${API_BASE_URL}/api/predictions`);
@@ -47,6 +50,8 @@ export async function initPredictorPage() {
                     allRacesData = staticData.races || [];
                 }
             }
+            
+            if (loadingAlert) loadingAlert.hidden = true;
         }
 
         if (statusText) {

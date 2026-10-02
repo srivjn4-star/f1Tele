@@ -291,7 +291,22 @@ export async function initComparisonPage() {
         const numB = Number(driverBSelect.value);
         loadComparisonBtn.disabled = true;
         loadComparisonBtn.textContent = "Loading...";
-        loadComparison(numA, numB).finally(() => {
+        loadComparison(numA, numB).catch(err => {
+            console.error("Comparison load error:", err);
+            
+            if (err.message && err.message.includes("429")) {
+                const alertEl = document.getElementById('openf1RateLimitAlert');
+                if (alertEl) alertEl.hidden = false;
+            } else if (state.currentSession?.date_start && state.currentSession?.date_end) {
+                const now = Date.now();
+                const startMs = new Date(state.currentSession.date_start).getTime();
+                const endMs = new Date(state.currentSession.date_end).getTime();
+                if (now >= startMs && now < endMs) {
+                    const alertEl = document.getElementById('openf1LiveSessionAlert');
+                    if (alertEl) alertEl.hidden = false;
+                }
+            }
+        }).finally(() => {
             loadComparisonBtn.textContent = "Load Comparison";
             validateDriverSelection();
         });

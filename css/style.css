@@ -815,3 +815,15 @@ tbody tr:hover, tr:hover {
     outline: 2px solid var(--amber);
     outline-offset: 2px;
 }
+.alert-cube--error {
+    border-left-color: var(--red);
+    padding: 16px 16px 16px 18px;
+}
+.alert-cube--error .alert-cube__text {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.alert-cube--info {
+    border-left-color: #29c2ff;
+}

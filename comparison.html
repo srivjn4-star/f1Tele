@@ -123,6 +123,14 @@
             <p class="alert-cube__text">Session finished — full historical telemetry is available for this race.</p>
             <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
         </div>
+        <div id="openf1RateLimitAlert" class="alert-cube alert-cube--error" hidden>
+            <p class="alert-cube__text">Try again in a bit later, there have been too many server requests to OpenF1.</p>
+            <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
+        </div>
+        <div id="openf1LiveSessionAlert" class="alert-cube alert-cube--error" hidden>
+            <p class="alert-cube__text">This session is currently live. OpenF1 does not allow fetching telemetry for live sessions without authentication.</p>
+            <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
+        </div>
     </div>
 </body>
 </html>
