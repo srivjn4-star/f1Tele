@@ -14,7 +14,6 @@ from typing import List, Optional, Tuple
 import fastf1
 import numpy as np
 import pandas as pd
-from fastf1.ergast import Ergast
 
 # Standard columns used throughout the pipeline
 COLUMNS_TEMP = [
@@ -22,7 +21,7 @@ COLUMNS_TEMP = [
     'CircuitShortName', 'StartDate', 'DriverNumber', 'FullName', 'Abbreviation',
     'DriverId', 'TeamId', 'Position', 'GridPosition', 'ClassifiedPosition',
     'Status', 'Points', 'Time', 'Laps', 'AirTemp', 'RainFall', 'WindSpeed',
-    'QualiTime', 'DriverPoints', 'ConstructorPoints'
+    'QualiTime'
 ]
 
 COLUMNS_FINAL = [
@@ -30,8 +29,7 @@ COLUMNS_FINAL = [
     'CircuitShortName', 'StartDate', 'DriverNumber', 'FullName', 'Abbreviation',
     'DriverId', 'TeamId', 'Position', 'GridPosition', 'ClassifiedPosition',
     'Status', 'Points', 'Time', 'Laps', 'AirTemp', 'RainFall', 'WindSpeed',
-    'QualiTime', 'DriverPoints', 'ConstructorPoints', 'TeamAverageFinishEWMA',
-    'EWMAFinishPosition', 'relevance_score'
+    'QualiTime', 'TeamAverageFinishEWMA', 'EWMAFinishPosition', 'relevance_score'
 ]
 
 
@@ -66,7 +64,7 @@ def avg_constr_EWMA(race_idx: int, team: str, driver_list: List) -> float:
     for driver in race:
         if driver[12] == team:
             avg += driver[13]
-            prev_ewma = driver[26]
+            prev_ewma = driver[24]
 
     ewma = calc_EWMA(prev_ewma, 0.56, avg)
     return ewma
@@ -84,7 +82,7 @@ def avg_driv_EWMA(driver_idx: int, driverId: str, driver_list: List) -> float:
     while i > 0:
         driver = driver_list[i]
         if driver[11] == driverId:
-            prev_ewma = driver[27]
+            prev_ewma = driver[25]
             pt = driver[13]
             break
         i -= 1
@@ -104,20 +102,6 @@ def find_minimum_time(q1, q2, q3):
     return min_time
 
 
-def find_driver_points(driverId: str, driver_standings: pd.DataFrame) -> float:
-    """Finds current season points for a driver from Ergast standings."""
-    driver_row = driver_standings.loc[driver_standings["driverId"] == driverId]
-    if not driver_row.empty:
-        return float(driver_row["points"].values[0])
-    return 0.0
-
-
-def find_constructor_points(teamId: str, constructor_standings: pd.DataFrame) -> float:
-    """Finds current season points for a constructor from Ergast standings."""
-    team_row = constructor_standings.loc[constructor_standings["constructorId"] == teamId]
-    if not team_row.empty:
-        return float(team_row["points"].values[0])
-    return 0.0
 
 
 def load_event_schedules(years: List[int]) -> List:
@@ -348,39 +332,6 @@ def attach_quali_to_race_data(driver_list: List, organized_quali_data: List) -> 
     return driver_list
 
 
-def attach_championship_standings(driver_list: List, ergast: Optional[Ergast] = None, delay_seconds: float = 1.0) -> List:
-    """Attaches driver points and constructor points via Ergast API."""
-    if ergast is None:
-        ergast = Ergast()
-
-    for session in driver_list:
-        try:
-            year = session[0][1]
-            round_num = session[0][0]
-            driver_standings = ergast.get_driver_standings(season=year, round=round_num).content[0]
-            if delay_seconds > 0:
-                time.sleep(delay_seconds)
-            constructor_standings = ergast.get_constructor_standings(season=year, round=round_num).content[0]
-
-            for driver in session:
-                driverId = driver[11]
-                teamId = driver[12]
-
-                driver_points = find_driver_points(driverId=driverId, driver_standings=driver_standings)
-                driver.append(driver_points)
-
-                constructor_points = find_constructor_points(teamId=teamId, constructor_standings=constructor_standings)
-                driver.append(constructor_points)
-        except Exception as e:
-            print(f"Warning: could not fetch Ergast standings for season {session[0][1]}, round {session[0][0]}: {e}")
-            for driver in session:
-                if len(driver) < 25:
-                    driver.append(0.0)
-                if len(driver) < 26:
-                    driver.append(0.0)
-
-    return driver_list
-
 
 def flatten_driver_list(nested_driver_list: List) -> List:
     """Flattens a list of sessions/races into a flat list of driver records."""
@@ -478,8 +429,6 @@ def run_full_data_pipeline(
     driver_list = build_initial_driver_list(all_driver_results, race_details, weather_data)
     driver_list = attach_quali_to_race_data(driver_list, organized_quali_data)
 
-    print("Fetching Ergast standings...")
-    driver_list = attach_championship_standings(driver_list)
 
     # Save temporary dataframe
     flat_driver_list_temp = flatten_driver_list(driver_list)
