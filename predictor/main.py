@@ -33,7 +33,7 @@ from predictor.predict_service import (
     get_race_data,
     predict_session_standings,
 )
-from predictor.server import run_server
+
 
 
 def cmd_train(args):
