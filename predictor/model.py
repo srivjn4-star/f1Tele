@@ -19,7 +19,7 @@ from xgboost import XGBRanker
 # Evaluation / feature columns
 COLS_EVAL = [
     'air_temp', 'rainfall', 'wind_speed', 'quali_relative_time',
-    'driver_points', 'constructor_points', 'constructors_ewma', 'driver_ewma'
+    'constructors_ewma', 'driver_ewma'
 ]
 
 # Original column renaming dictionary
@@ -48,8 +48,6 @@ COL_NAME = {
     'RainFall': "rainfall",
     'WindSpeed': "wind_speed",
     'QualiTime': "quali_relative_time",
-    'DriverPoints': "driver_points",
-    'ConstructorPoints': "constructor_points",
     'TeamAverageFinishEWMA': "constructors_ewma",
     'EWMAFinishPosition': "driver_ewma",
     'relevance_score': "relevance_score"
@@ -150,15 +148,25 @@ def train_ranker(
     Initializes and fits XGBRanker model. Integrates test set evaluation
     during training if X_test is provided.
     """
-    ranker = XGBRanker(
-        tree_method=tree_method,
-        objective=objective,
-        eval_metric=eval_metric,
-        learning_rate=learning_rate,
-        max_depth=max_depth,
-        n_estimators=n_estimators,
-        ndcg_exp_gain=ndcg_exp_gain
-    )
+    best_param = {'n_estimators': 201, 
+                  'learning_rate': 0.03383069583686316, 
+                  'max_depth': 3, 
+                  'max_leaves': 13, 
+                  'reg_alpha': 0.002510243934542673, 
+                  'reg_lambda': 0.0021597028305427885, 
+                  'subsample': 0.6468005402272017, 
+                  'colsample_bytree': 0.9624782400198506, 
+                  'min_child_weight': 5, 
+                  'gamma': 0.07768836449080203,
+                  'objective': "rank:ndcg",
+                  'eval_metric': "ndcg",
+                  'early_stopping_rounds' : 30,
+                  'tree_method': "exact",
+                  'ndcg_exp_gain' : False,
+                  'lambdarank_unbiased' : False,
+                  'lambdarank_pair_method' : 'mean'}
+
+    ranker = XGBRanker(**best_param)
 
     if X_test is not None and y_test is not None and qid_test is not None:
         ranker.fit(
