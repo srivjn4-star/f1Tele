@@ -173,7 +173,7 @@ function renderRaceStandings(race) {
                 <div class="podium-card__rank">P${item.predicted_position}</div>
                 <h4 class="podium-card__name">${escapeHtml(item.full_name)} (${escapeHtml(item.abbreviation)})</h4>
                 <div class="podium-card__team">${escapeHtml(formatTeamName(item.team_id))}</div>
-                <div class="podium-card__score">Score: <strong>${item.prediction_score.toFixed(4)}</strong></div>
+                <div class="podium-card__score">Relevance Score: <strong>${item.prediction_score.toFixed(4)}</strong></div>
             `;
             podiumGrid.appendChild(card);
         });
@@ -229,6 +229,7 @@ function renderRaceStandings(race) {
 
 function formatTeamName(teamId) {
     if (!teamId) return '';
+    if (teamId.toLowerCase() === 'rb') return 'VCARB';
     return teamId
         .replace(/_/g, ' ')
         .replace(/\b\w/g, l => l.toUpperCase());
