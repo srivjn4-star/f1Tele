@@ -26,6 +26,22 @@ from predictor.data_pipeline import (
     compute_ewma_and_relevance,
     group_by_session,
 )
+
+def clean_nans_for_json(obj: Any) -> Any:
+    """
+    Recursively scrubs a dictionary or list, replacing pandas/numpy/math NaNs with None.
+    Ensures standard python json.dumps() can serialize the object safely.
+    """
+    if isinstance(obj, dict):
+        return {k: clean_nans_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_nans_for_json(v) for v in obj]
+    elif isinstance(obj, float):
+        if pd.isna(obj):
+            return None
+        return obj
+    return obj
+
 from predictor.model import COLS_EVAL, load_and_clean_data, load_model
 
 
@@ -369,7 +385,7 @@ def export_predictions_json(
             ranked_df = predict_session_standings(ranker, race_df)
             standings = format_standings_display(ranked_df)
 
-            export_data['races'].append({
+            export_data['races'].append(clean_nans_for_json({
                 'year': race_meta['year'],
                 'round': race_meta['round'],
                 'race_name': race_meta['race_name'],
@@ -381,7 +397,7 @@ def export_predictions_json(
                     'wind_speed': round(float(race_df['wind_speed'].iloc[0]), 1)
                 },
                 'standings': standings
-            })
+            }))
         except Exception as e:
             print(f"Warning: could not export predictions for session {race_meta['session_key']}: {e}")
 
@@ -392,7 +408,7 @@ def export_predictions_json(
         ranked_df = predict_session_standings(ranker, future_race_df)
         standings = format_standings_display(ranked_df)
 
-        export_data['races'].append({
+        export_data['races'].append(clean_nans_for_json({
             'year': future_meta['year'],
             'round': future_meta['round'],
             'race_name': future_meta['race_name'],
@@ -404,7 +420,7 @@ def export_predictions_json(
                 'wind_speed': round(float(future_race_df['wind_speed'].iloc[0]), 1)
             },
             'standings': standings
-        })
+        }))
         print(f"Added future race: {future_meta['race_name']}")
     except Exception as e:
         print(f"Warning: could not export predictions for future race: {e}")
@@ -484,13 +500,271 @@ def cache_single_race_prediction(response_data: Dict[str, Any], output_path: str
     except Exception as e:
         logger.error(f"Error caching single race: {e}")
 
+# 1. Driver performance columns (from session.results)
+session_results_columns = [
+    "DriverNumber",
+    "FullName",
+    "Abbreviation",
+    "DriverId",
+    "TeamId",
+    "Position",
+    "GridPosition",
+    "ClassifiedPosition",
+    "Status",
+    "Points",
+    "Time",
+    "Laps",
+]
+
+def _fetch_new_race_data(
+    year: int,
+    round_num_or_name: Any
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Fetches a race session from fastf1 and formats it into a df
+    """
+    enable_fastf1_cache()
+    event = fastf1.get_event(year, round_num_or_name)
+    
+    race_session = event.get_session('R')
+    race_session.load()
+
+    # Pull the subset of driver results
+    df = race_session.results[session_results_columns].copy()
+
+    # 2. Extract session & event metadata
+    s_info = race_session.session_info
+    meeting = s_info.get("Meeting", {})
+    circuit = meeting.get("Circuit", {})
+    start_date = s_info.get("StartDate")
+
+    # 3. Insert event & session details at the front for each driver
+    df.insert(0, "Round", event["RoundNumber"])
+    df.insert(1, "Year", start_date.year if hasattr(start_date, "year") else event["EventDate"].year)
+    df.insert(2, "RaceName", meeting.get("Name"))
+    df.insert(3, "MeetingKey", meeting.get("Key"))
+    df.insert(4, "SessionKey", s_info.get("Key"))
+    df.insert(5, "CircuitKey", circuit.get("Key"))
+    df.insert(6, "CircuitShortName", circuit.get("ShortName"))
+    df.insert(7, "StartDate", start_date)
+
+    metadata = {
+        'year': int(start_date.year if hasattr(start_date, "year") else event["EventDate"].year),
+        'round': int(event['RoundNumber']),
+        'race_name': meeting.get("Name"),
+        'circuit': circuit.get("ShortName"),
+        'session_key': int(s_info.get("Key")),
+        'source': 'fastf1'
+    }
+    return df, metadata
+
+def _fetch_quali_weather_data(
+    year: int,
+    round_num_or_name: Any
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Fetches a qualifying session from fastf1, calculates the best Q time
+    and averages the weather data.
+    """
+    logger.info(f"[{year} Round {round_num_or_name}] Starting _fetch_quali_weather_data")
+    enable_fastf1_cache()
+    event = fastf1.get_event(year, round_num_or_name)
+    
+    quali_session = event.get_session('Q')
+    logger.info(f"[{year} Round {round_num_or_name}] Loading Q session from FastF1")
+    quali_session.load()
+
+    logger.info(f"[{year} Round {round_num_or_name}] Processing weather data")
+    # Get weather data average (AirTemp, Rainfall fraction, WindSpeed)
+    weather = process_weather_data([quali_session.weather_data])[0]
+    air_temp, rainfall, wind_speed = weather
+    
+    records = []
+    for _, row in quali_session.results.iterrows():
+        driver_id = row.get('DriverId')
+        if not driver_id or pd.isna(driver_id):
+            full_name = str(row.get('FullName', ''))
+            driver_id = full_name.split()[-1].lower() if full_name else str(row.get('Abbreviation', ''))
+
+        team_id = row.get('TeamId')
+        if not team_id or pd.isna(team_id):
+            team_name = str(row.get('TeamName', ''))
+            team_id = team_name.lower().replace(' ', '_').replace('-', '_') if team_name else ''
+            
+        q_time = find_minimum_time(row.get('Q1'), row.get('Q2'), row.get('Q3'))
+        
+        records.append({
+            'SessionKey': getattr(quali_session, 'session_info', {}).get('Key'),
+            'DriverNumber': row.get('DriverNumber', 0),
+            'Abbreviation': row.get("Abbreviation"),
+            'FullName': row.get("FullName"),
+            'DriverId': driver_id,
+            'TeamId': team_id,
+            'AirTemp': air_temp,
+            'RainFall': rainfall,
+            'WindSpeed': wind_speed,
+            'QualiTime': q_time
+        })
+
+    df = pd.DataFrame(records)
+
+    s_info = quali_session.session_info
+    meeting = s_info.get("Meeting", {})
+    circuit = meeting.get("Circuit", {})
+    start_date = s_info.get("StartDate")
+    
+    metadata = {
+        'year': int(start_date.year if hasattr(start_date, "year") else event["EventDate"].year),
+        'round': int(event['RoundNumber']),
+        'race_name': meeting.get("Name"),
+        'circuit': circuit.get("ShortName"),
+        'session_key': int(s_info.get("Key")),
+        'source': 'fastf1'
+    }
+   
+    return df, metadata
+
 def check_and_predict_new_races(ranker: Optional[XGBRanker] = None, csv_path: str = "predictor/data/driver_results_final.csv"):
     """
     Checks FastF1 for new races that have had their qualifying session finished,
     and automatically generates predictions for them if they aren't already cached.
     Ensures order is preserved for EWMA calculation.
     """
-    logger.info("Checking for new finished qualifying sessions...")
+    logger.info("Checking for new finished race sessions...")
+    if ranker is None:
+        ranker = load_model("predictor/ranker_model.json")
+
+    current_year = datetime.datetime.now().year
+    enable_fastf1_cache()
+    
+    try:
+        schedule = fastf1.get_event_schedule(current_year)
+        logger.info(f"Fetched year schedule for year{current_year}")
+    except Exception as e:
+        logger.error(f"Could not fetch {current_year} year schedule from FastF1: {e}")
+        return
+
+    # Filter out testing and order chronologically
+    valid_events = schedule[~schedule.is_testing()].sort_values('RoundNumber')
+
+    #Load existing race data into cache to avoid re-fetching races
+    cached_races = get_available_races()
+    cached_races = {(item['year'], item['round']) for item in cached_races}
+
+    # Create a timezone-aware current time in UTC
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+    # Check which races need to actually be fetched
+    for _, event_row in valid_events.iterrows():
+        round_num = event_row['RoundNumber']
+        
+        # 1. Skip if already cached
+        if (current_year, round_num) in cached_races:
+            continue
+            i
+        # 2. Find the Race session date from the schedule row
+        q_date_utc = None
+        for i in range(1, 6):
+            if event_row.get(f'Session{i}') == 'Race':
+                # FastF1 schedule dates are Pandas Timestamps
+                q_date_utc = event_row.get(f'Session{i}DateUtc')
+                break
+                
+        # 3. If Race has passed, fetch the heavy event data and (re)predict
+        if q_date_utc:
+            # Ensure it's tz-aware for comparison
+            if q_date_utc.tzinfo is None:
+                q_date_utc = q_date_utc.replace(tzinfo=datetime.timezone.utc)
+                
+            if q_date_utc < now_utc:
+                logger.info(f"Found new finished Race for {current_year} Round {round_num}. Fetching data...")
+                try:
+                    # Now we do the heavy fetching
+
+                    # Fetch the Race Data
+                    race_df, metadata = _fetch_new_race_data(current_year, round_num)
+
+                    #Fetch the Quali and Weather Data
+                    quali_weather_df, _ = _fetch_quali_weather_data(current_year, round_num)
+
+                    # 1. Combine them
+                    cols_to_use = quali_weather_df.columns.difference(race_df.columns).tolist() + ['Abbreviation']
+                    combined_df = pd.merge(race_df, quali_weather_df[cols_to_use], on=['Abbreviation'], how='left')
+
+                    # 2. Calculate EWMA & Relevance
+                    historical_df = pd.read_csv("predictor/data/driver_results_final.csv")
+                    
+                    # Ensure columns match COLUMNS_TEMP
+                    from predictor.data_pipeline import COLUMNS_TEMP, group_by_session, compute_ewma_and_relevance
+                    
+                    # Create records in the exact order of COLUMNS_TEMP
+                    new_records_df = pd.DataFrame(columns=COLUMNS_TEMP)
+                    for col in COLUMNS_TEMP:
+                        if col in combined_df.columns:
+                            new_records_df[col] = combined_df[col]
+                        else:
+                            new_records_df[col] = np.nan
+
+                    # Append to historical for calculation
+                    temp_combined = pd.concat([historical_df, new_records_df], ignore_index=True)
+                    
+                    # Group and compute EWMA
+                    records_list = temp_combined[COLUMNS_TEMP].values.tolist()
+                    grouped = group_by_session(records_list)
+                    _, final_df = compute_ewma_and_relevance(grouped)
+
+                    # Extract just the newly computed rows
+                    session_key = metadata['session_key']
+                    new_computed_df = final_df[final_df['SessionKey'] == session_key].copy()
+
+                    # 3. Append to CSV
+                    # new_computed_df contains all combined data + EWMAs + Relevance Score!
+                    new_computed_df.to_csv('predictor/data/driver_results_final.csv', mode='a', header=False, index=False)
+
+                    # For the ranker prediction
+                    quali_times = pd.to_timedelta(new_computed_df['QualiTime'])
+                    fastest_time = quali_times.min()
+                    def calc_relative(x):
+                        if pd.isna(x) or pd.isna(fastest_time): return 9960000.0
+                        return (((x - fastest_time) / datetime.timedelta(microseconds=1)) / 1000)
+                    new_computed_df['quali_relative_time'] = quali_times.map(calc_relative)
+                    
+                    new_computed_df.rename(columns={
+                        'TeamAverageFinishEWMA': 'constructors_ewma', 
+                        'EWMAFinishPosition': 'driver_ewma',
+                        'AirTemp': 'air_temp',
+                        'RainFall': 'rainfall',
+                        'WindSpeed': 'wind_speed'
+                    }, inplace=True)
+                    
+                    for col in ['constructors_ewma', 'driver_ewma']:
+                        new_computed_df[col] = new_computed_df[col].map(lambda x: 20.0 if pd.isna(x) else float(x))
+                        
+                    ranked_df = predict_session_standings(ranker, new_computed_df)
+                    standings = format_standings_display(ranked_df)
+                    
+                    response_data = {
+                        "metadata": metadata,
+                        "weather": {
+                            "air_temp": round(float(new_computed_df["air_temp"].iloc[0]), 1) if "air_temp" in new_computed_df else None,
+                            "rainfall_pct": round(float(new_computed_df["rainfall"].iloc[0]) * 100, 1) if "rainfall" in new_computed_df else None,
+                            "wind_speed": round(float(new_computed_df["wind_speed"].iloc[0]), 1) if "wind_speed" in new_computed_df else None
+                        },
+                        "standings": standings
+                    }
+                    cache_single_race_prediction(clean_nans_for_json(response_data))
+                    cached_races.add((current_year, round_num))
+                    
+                except Exception as pred_err:
+                    logger.error(f"Failed to generate fetch and prediction for Round {round_num}: {pred_err}")
+
+
+def check_and_predict_new_qualifications(ranker: Optional[XGBRanker] = None, csv_path: str = "predictor/data/driver_results_final.csv"):
+    """
+    Checks FastF1 for new qualifications that have finished when the race has not yet occurred,
+    and automatically generates predictions using a custom EWMA lookup.
+    """
+    logger.info("Checking for new finished qualifications...")
     if ranker is None:
         ranker = load_model("predictor/ranker_model.json")
 
@@ -500,13 +774,11 @@ def check_and_predict_new_races(ranker: Optional[XGBRanker] = None, csv_path: st
     try:
         schedule = fastf1.get_event_schedule(current_year)
     except Exception as e:
-        logger.error(f"Could not fetch schedule from FastF1: {e}")
+        logger.error(f"Could not fetch {current_year} year schedule from FastF1: {e}")
         return
 
-    # Filter out testing and order chronologically
-    valid_events = schedule[schedule['EventFormat'] != 'testing'].sort_values('RoundNumber')
-    
-    # Load existing cached predictions by year and round to avoid re-predicting
+    valid_events = schedule[~schedule.is_testing()].sort_values('RoundNumber')
+
     cached_races = set()
     try:
         with open("predictor/predictions.json", "r", encoding="utf-8") as f:
@@ -515,49 +787,113 @@ def check_and_predict_new_races(ranker: Optional[XGBRanker] = None, csv_path: st
     except Exception:
         pass
 
-    # Create a timezone-aware current time in UTC
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    
+    try:
+        historical_df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        logger.error(f"Historical CSV not found at {csv_path}")
+        return
+
     for _, event_row in valid_events.iterrows():
         round_num = event_row['RoundNumber']
         
-        # 1. Skip if already cached
         if (current_year, round_num) in cached_races:
             continue
             
-        # 2. Find the Qualifying session date from the schedule row
         q_date_utc = None
         for i in range(1, 6):
             if event_row.get(f'Session{i}') == 'Qualifying':
-                # FastF1 schedule dates are Pandas Timestamps
                 q_date_utc = event_row.get(f'Session{i}DateUtc')
                 break
                 
-        # 3. If Quali has passed, fetch the heavy event data and predict
         if q_date_utc:
-            # Ensure it's tz-aware for comparison
             if q_date_utc.tzinfo is None:
                 q_date_utc = q_date_utc.replace(tzinfo=datetime.timezone.utc)
                 
             if q_date_utc < now_utc:
-                logger.info(f"Found new finished Quali for {current_year} Round {round_num}. Generating predictions...")
+                logger.info(f"Found new finished Quali for {current_year} Round {round_num}. Generating Quali-only predictions...")
                 try:
-                    # Now we do the heavy fetching
-                    race_df, metadata = get_race_data(year=current_year, round_num=round_num, csv_path=csv_path)
-                    ranked_df = predict_session_standings(ranker, race_df)
+                    quali_weather_df, metadata = _fetch_quali_weather_data(current_year, round_num)
+                    
+                    from predictor.data_pipeline import calc_EWMA
+                    records = []
+                    fastest_time = quali_weather_df['QualiTime'].min()
+                    
+                    logger.info(f"[{current_year} Round {round_num}] Calculating EWMAs via historical lookup")
+                    for i, (_, row) in enumerate(quali_weather_df.iterrows()):
+                        quali_position = float(i + 1)
+                        
+                        driver_id = row['DriverId']
+                        team_id = row['TeamId']
+                        
+                        # 1. Driver EWMA (filter by driver, get last row)
+                        driver_hist = historical_df[historical_df['DriverId'] == driver_id]
+                        if not driver_hist.empty:
+                            last_row = driver_hist.iloc[-1]
+                            driver_ewma = calc_EWMA(last_row['EWMAFinishPosition'], 0.56, last_row['Position'])
+                        else:
+                            driver_ewma = quali_position
+                            
+                        # 2. Constructor EWMA (filter by team, get last race rows)
+                        team_hist = historical_df[historical_df['TeamId'] == team_id]
+                        if not team_hist.empty:
+                            last_session_key = team_hist.iloc[-1]['SessionKey']
+                            last_race_team = team_hist[team_hist['SessionKey'] == last_session_key]
+                            avg_pos = last_race_team['Position'].mean()
+                            prev_constr_ewma = last_race_team.iloc[0]['TeamAverageFinishEWMA']
+                            constr_ewma = calc_EWMA(prev_constr_ewma, 0.56, avg_pos)
+                        else:
+                            # TODO: Fix this later to average both drivers' quali positions instead of static 20.0
+                            constr_ewma = 20.0
+                            
+                        # 3. Relative Quali Time
+                        q_time = row['QualiTime']
+                        if pd.isna(q_time) or pd.isna(fastest_time):
+                            quali_relative_time_ms = 9960000.0
+                        else:
+                            delta = q_time - fastest_time
+                            quali_relative_time_ms = (delta / datetime.timedelta(microseconds=1)) / 1000
+
+                        records.append({
+                            'SessionKey': row['SessionKey'],
+                            'DriverNumber': row['DriverNumber'],
+                            'Abbreviation': row['Abbreviation'],
+                            'FullName': row['FullName'],
+                            'DriverId': driver_id,
+                            'TeamId': team_id,
+                            'air_temp': row['AirTemp'],
+                            'rainfall': row['RainFall'],
+                            'wind_speed': row['WindSpeed'],
+                            'quali_relative_time': quali_relative_time_ms,
+                            'constructors_ewma': constr_ewma,
+                            'driver_ewma': driver_ewma
+                        })
+                        
+                    new_computed_df = pd.DataFrame(records)
+                    
+                    logger.info(f"[{current_year} Round {round_num}] Passing features to XGBRanker for prediction")
+                    # 4. Predict
+                    ranked_df = predict_session_standings(ranker, new_computed_df)
                     standings = format_standings_display(ranked_df)
+                    
+                    # Wipe actual position and points
+                    for s in standings:
+                        s['actual_position'] = None
+                        s['accuracy_delta'] = None
+                        if 'driver_pts' in s:
+                            s['driver_pts'] = None
                     
                     response_data = {
                         "metadata": metadata,
                         "weather": {
-                            "air_temp": round(float(race_df["air_temp"].iloc[0]), 1) if "air_temp" in race_df else None,
-                            "rainfall_pct": round(float(race_df["rainfall"].iloc[0]) * 100, 1) if "rainfall" in race_df else None,
-                            "wind_speed": round(float(race_df["wind_speed"].iloc[0]), 1) if "wind_speed" in race_df else None
+                            "air_temp": round(float(new_computed_df["air_temp"].iloc[0]), 1) if "air_temp" in new_computed_df else None,
+                            "rainfall_pct": round(float(new_computed_df["rainfall"].iloc[0]) * 100, 1) if "rainfall" in new_computed_df else None,
+                            "wind_speed": round(float(new_computed_df["wind_speed"].iloc[0]), 1) if "wind_speed" in new_computed_df else None
                         },
                         "standings": standings
                     }
-                    cache_single_race_prediction(response_data)
+                    cache_single_race_prediction(clean_nans_for_json(response_data))
                     cached_races.add((current_year, round_num))
                     
                 except Exception as pred_err:
-                    logger.error(f"Failed to generate prediction for Round {round_num}: {pred_err}")
+                    logger.error(f"Failed to generate Quali prediction for Round {round_num}: {pred_err}")

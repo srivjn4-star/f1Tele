@@ -25,7 +25,8 @@ from predictor.predict_service import (
     predict_session_standings,
     export_predictions_json,
     cache_single_race_prediction,
-    check_and_predict_new_races
+    check_and_predict_new_races,
+    check_and_predict_new_qualifications
 )
 
 # Configure logging (similar to Winston or Morgan in Node.js)
@@ -64,6 +65,8 @@ async def lifespan(app: FastAPI):
         ranker = get_cached_ranker()
         # Automatically updates predictions for any races that just finished Quali
         check_and_predict_new_races(ranker)
+        logger.info("Finished fetching new races")
+        check_and_predict_new_qualifications(ranker)
     except Exception as e:
         logger.error(f"Error during startup check for new races: {e}")
     yield
@@ -84,6 +87,7 @@ app.add_middleware(
         "https://srivjn4-star.github.io/f1Tele/predictor.html",
         "http://127.0.0.1:3000/predictor.html",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:8001",
         "http://localhost:8000",
         "http://127.0.0.1:8000"
     ],
@@ -149,6 +153,7 @@ def predict_race(
         
         # Check for auto-update of new races as part of the predict request lifecycle
         check_and_predict_new_races(ranker)
+        check_and_predict_new_qualifications(ranker)
 
         # Default fallback session
         if session_key is None and year is None and race_name is None:
@@ -218,6 +223,7 @@ def update_all_predictions(background_tasks: BackgroundTasks):
             logger.info("Starting background export of predictions...")
             export_predictions_json(ranker)
             check_and_predict_new_races(ranker)
+            check_and_predict_new_qualifications(ranker)
             logger.info("Background update completed.")
         except Exception as e:
             logger.error(f"Background update failed: {e}")
