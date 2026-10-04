@@ -228,7 +228,7 @@ def _fetch_and_calculate_features_unified(
     event = fastf1.get_event(year, round_num_or_name)
     
     quali_session = event.get_session('Q')
-    quali_session.load()
+    quali_session.load(telemetry=False, laps=False, weather=True)
     quali_delta_ms = _compute_relative_quali_times(quali_session.results)
 
     if is_future:
@@ -236,7 +236,7 @@ def _fetch_and_calculate_features_unified(
         results_to_use = quali_session.results
     else:
         session_to_use = event.get_session('R')
-        session_to_use.load()
+        session_to_use.load(telemetry=False, laps=False, weather=True)
         results_to_use = session_to_use.results
 
     weather = process_weather_data([session_to_use.weather_data])[0]
@@ -527,7 +527,7 @@ def _fetch_new_race_data(
     event = fastf1.get_event(year, round_num_or_name)
     
     race_session = event.get_session('R')
-    race_session.load()
+    race_session.load(telemetry=False, laps=False, weather=False)
 
     # Pull the subset of driver results
     df = race_session.results[session_results_columns].copy()
@@ -572,7 +572,7 @@ def _fetch_quali_weather_data(
     
     quali_session = event.get_session('Q')
     logger.info(f"[{year} Round {round_num_or_name}] Loading Q session from FastF1")
-    quali_session.load()
+    quali_session.load(telemetry=False, laps=False, weather=True)
 
     logger.info(f"[{year} Round {round_num_or_name}] Processing weather data")
     # Get weather data average (AirTemp, Rainfall fraction, WindSpeed)
