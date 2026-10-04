@@ -466,8 +466,9 @@ def cache_single_race_prediction(response_data: Dict[str, Any], output_path: str
             }
 
         # Check if already exists, if so, replace
-        session_key = response_data['metadata']['session_key']
-        existing_idx = next((i for i, r in enumerate(data['races']) if r.get('session_key') == session_key), None)
+        req_year = response_data['metadata']['year']
+        req_round = response_data['metadata']['round']
+        existing_idx = next((i for i, r in enumerate(data['races']) if r.get('year') == req_year and r.get('round') == req_round), None)
         
         race_entry = {
             'year': response_data['metadata']['year'],
