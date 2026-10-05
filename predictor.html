@@ -32,19 +32,38 @@
             </div>
 
             <div class="predictor-panel">            
-                <div class="predictor-selector-bar">
-                    <div class="driver-select">
-                        <label for="predictorYearSelect">YEAR</label>
-                        <select id="predictorYearSelect" aria-label="Select Season Year"></select>
+                <style>
+                .tooltip-container { position: relative; display: flex; align-items: center; justify-content: center; cursor: help; color: var(--text-dim); transition: color 0.2s; }
+                .tooltip-container:hover { color: var(--text); }
+                .tooltip-text { visibility: hidden; width: 280px; background-color: var(--panel); color: var(--text); text-align: left; border-radius: 6px; padding: 12px; position: absolute; z-index: 10; top: 150%; right: 0; border: 1px solid var(--panel-line); font-size: 0.75rem; font-family: var(--font-mono); line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.2s; text-transform: none; font-weight: normal; }
+                .tooltip-container:hover .tooltip-text { visibility: visible; opacity: 1; }
+                </style>
+                <div class="predictor-selector-bar" style="flex-direction: column; align-items: stretch; gap: 16px;">
+                    <!-- Row 1: Year and Toggle -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <div class="driver-select">
+                            <label for="predictorYearSelect">YEAR</label>
+                            <select id="predictorYearSelect" aria-label="Select Season Year"></select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div class="tooltip-container">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                                <span class="tooltip-text">The free Render backend winds down after 15 minutes of inactivity. It may take 1-2 minutes to boot back up. Use this button to instantly view precomputed values while waiting!</span>
+                            </div>
+                            <button id="dataSourceToggleBtn" style="padding: 6px 12px; border-radius: 4px; border: 1px solid var(--panel-line); font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700; cursor: pointer; transition: all 0.2s; background: var(--panel-line); color: var(--text-dim);">LOADING...</button>
+                        </div>
                     </div>
-                    <div class="driver-select">
-                        <label for="predictorRaceSelect">GRAND PRIX</label>
-                        <select id="predictorRaceSelect" aria-label="Select Grand Prix"></select>
+                    
+                    <!-- Row 2: Race and Status -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <div class="driver-select">
+                            <label for="predictorRaceSelect">GRAND PRIX</label>
+                            <select id="predictorRaceSelect" aria-label="Select Grand Prix"></select>
+                        </div>
+                        <span id="predictorStatusBadge" class="weather-pill">
+                            <span id="predictorStatusText" class="weather-pill__label">MODEL</span>
+                        </span>
                     </div>
-                    <span id="predictorStatusBadge" class="weather-pill" style="margin-left: auto;">
-                        <span id="predictorStatusText" class="weather-pill__label">MODEL</span>
-                        <!-- <span id="predictorStatusText">Loading...</span> -->
-                    </span>
                 </div>
 
                 <div id="raceMetaCard" class="predictor-meta-card" style="display: none;">

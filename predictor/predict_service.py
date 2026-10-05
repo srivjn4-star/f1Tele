@@ -475,7 +475,6 @@ def cache_single_race_prediction(response_data: Dict[str, Any], output_path: str
             'round': response_data['metadata']['round'],
             'race_name': response_data['metadata']['race_name'],
             'circuit': response_data['metadata']['circuit'],
-            'session_key': session_key,
             'weather': response_data['weather'],
             'standings': response_data['standings']
         }

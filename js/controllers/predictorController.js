@@ -10,67 +10,154 @@
 const API_BASE_URL = 'https://f1tele.onrender.com';
 let allRacesData = [];
 let isLiveApi = false;
+let currentAbortController = null;
+let useLocalMode = false; // toggle state
 
 /**
- * Initializes the predictor page by attempting to connect to the
- * Python REST API server, or falling back to pre-computed predictions.json.
+ * Initializes the predictor page by setting up the toggle button 
+ * and fetching the initial data (Live by default).
  */
 export async function initPredictorPage() {
-    const statusText = document.getElementById('predictorStatusText');
-    const yearSelect = document.getElementById('predictorYearSelect');
-    const raceSelect = document.getElementById('predictorRaceSelect');
+    setupToggleButton();
+    await loadData();
+}
 
-    try {
-        if (!allRacesData || allRacesData.length === 0) {
-            const loadingAlert = document.getElementById('backendLoadingAlert');
-            if (loadingAlert) loadingAlert.hidden = false;
+/**
+ * Sets up the event listener and initial state for the toggle button.
+ */
+function setupToggleButton() {
+    const toggleBtn = document.getElementById('dataSourceToggleBtn');
+    if (!toggleBtn) return;
+
+    // Clone to remove old listeners
+    const newToggleBtn = toggleBtn.cloneNode(true);
+    toggleBtn.replaceWith(newToggleBtn);
+    const activeBtn = document.getElementById('dataSourceToggleBtn');
+
+    activeBtn.addEventListener('click', async () => {
+        useLocalMode = !useLocalMode; // toggle state
         
-            try {
-                // 1. Try to fetch from the live Python backend API
-                const apiRes = await fetch(`${API_BASE_URL}/api/predictions`);
-                if (apiRes.ok) {
-                    const apiData = await apiRes.json();
-                    allRacesData = apiData.races || [];
-                    isLiveApi = true;
-                } else {
-                    throw new Error("API returned non-200");
-                }
-            } catch (apiErr) {
-                console.log("Live API not reachable, falling back to static JSON.", apiErr);
-                isLiveApi = false;
-                
-                // 2. Fallback to static pre-computed JSON if backend is not running
-                const staticRes = await fetch('predictions.json');
-                if (!staticRes.ok) {
-                    const fallbackRes = await fetch('predictor/predictions.json');
-                    const fallbackData = await fallbackRes.json();
-                    allRacesData = fallbackData.races || [];
-                } else {
-                    const staticData = await staticRes.json();
-                    allRacesData = staticData.races || [];
-                }
-            }
-            
-            if (loadingAlert) loadingAlert.hidden = true;
+        if (useLocalMode && currentAbortController) {
+            // We are hanging on a live fetch, abort it!
+            // The catch block in fetchLiveServer() will handle falling back to local.
+            currentAbortController.abort(); 
+        } else {
+            // Re-fetch entirely (e.g., switching back to Live Server)
+            allRacesData = null;
+            await loadData();
         }
+    });
+}
 
-        if (statusText) {
-            statusText.textContent = isLiveApi ? 'API Active (Live)' : 'Precomputed (XGBRanker)';
-            statusText.style.color = isLiveApi ? '#4cd964' : 'var(--amber)';
-        }
+/**
+ * Updates the visual state of the toggle button based on useLocalMode
+ */
+function updateButtonUI() {
+    const activeBtn = document.getElementById('dataSourceToggleBtn');
+    if (!activeBtn) return;
+    
+    if (useLocalMode) {
+        activeBtn.style.backgroundColor = 'var(--panel-line)';
+        activeBtn.style.color = 'var(--text-dim)';
+        activeBtn.style.border = '1px solid var(--panel-line)';
+        activeBtn.textContent = 'FETCH FROM LIVE BACKEND';
+    } else {
+        activeBtn.style.backgroundColor = 'var(--red)';
+        activeBtn.style.color = '#fff';
+        activeBtn.style.border = '1px solid var(--red)';
+        activeBtn.textContent = 'CANCEL & USE PRECOMPUTED';
+    }
+}
 
-        if (!allRacesData || allRacesData.length === 0) {
-            throw new Error('No race prediction data available.');
-        }
+/**
+ * Main coordinator to load data and update UI.
+ */
+async function loadData() {
+    updateButtonUI();
 
-        setupSelectors(yearSelect, raceSelect);
+    if (useLocalMode) {
+        await fetchLocalData();
+    } else {
+        await fetchLiveServer();
+    }
 
-    } catch (err) {
-        console.error('Failed to initialize predictor:', err);
+    // Update Status Tag
+    const statusText = document.getElementById('predictorStatusText');
+    if (statusText) {
+        statusText.textContent = isLiveApi ? 'LIVE BACKEND SERVER' : 'LOCAL PRECOMPUTED VALUES';
+        statusText.style.color = isLiveApi ? '#4cd964' : 'var(--amber)';
+    }
+
+    if (!allRacesData || allRacesData.length === 0) {
+        console.error('No race prediction data available.');
         if (statusText) {
             statusText.textContent = 'Data Offline';
             statusText.style.color = 'var(--red)';
         }
+        return;
+    }
+
+    const yearSelect = document.getElementById('predictorYearSelect');
+    const raceSelect = document.getElementById('predictorRaceSelect');
+    setupSelectors(yearSelect, raceSelect);
+}
+
+/**
+ * Fetches data strictly from the Live API with Abort support.
+ */
+async function fetchLiveServer() {
+    const loadingAlert = document.getElementById('backendLoadingAlert');
+    if (loadingAlert) loadingAlert.hidden = false;
+    
+    currentAbortController = new AbortController();
+    try {
+        const apiRes = await fetch(`${API_BASE_URL}/api/predictions`, {
+            signal: currentAbortController.signal
+        });
+        
+        if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            allRacesData = apiData.races || [];
+            isLiveApi = true;
+        } else {
+            throw new Error("API returned non-200");
+        }
+    } catch (apiErr) {
+        if (apiErr.name === 'AbortError') {
+            console.log("Live API fetch was manually aborted by user. Falling back to local data.");
+        } else {
+            console.log("Live API not reachable, falling back to static JSON.", apiErr);
+        }
+        
+        useLocalMode = true;
+        updateButtonUI();
+        await fetchLocalData();
+    } finally {
+        // when fetch is complete
+        currentAbortController = null; 
+    }
+    if(loadingAlert) loadingAlert.hidden = true;
+}
+
+/**
+ * Fetches data strictly from the precomputed JSON.
+ */
+async function fetchLocalData() {
+    try {
+        const staticRes = await fetch('predictions.json');
+        if (!staticRes.ok) {
+            const fallbackRes = await fetch('predictor/predictions.json');
+            const fallbackData = await fallbackRes.json();
+            allRacesData = fallbackData.races || [];
+        } else {
+            const staticData = await staticRes.json();
+            allRacesData = staticData.races || [];
+        }
+        isLiveApi = false;
+    } catch (err) {
+        console.error("Failed to load local static JSON", err);
+        allRacesData = [];
+        isLiveApi = false;
     }
 }
 
