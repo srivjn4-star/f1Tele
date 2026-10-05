@@ -93,7 +93,7 @@ body {
     color: var(--text-dim);
     font-size: 0.95rem;
     line-height: 1.6;
-    max-width: 640px;
+    max-width: 780px;
     margin: 0 0 28px;
 }
 
@@ -141,7 +141,7 @@ body {
     border: 1px solid var(--panel-line);
     border-radius: 4px;
     padding: 32px 28px;
-    max-width: 640px;
+    max-width: 780px;
 }
 
 .predictor-placeholder {
