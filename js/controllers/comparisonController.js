@@ -26,7 +26,10 @@ import {
 import {
     hideAllSessionAlerts,
     updateAlertsForSession,
-    wireAlertCloseButtons
+    wireAlertCloseButtons,
+    showRateLimitAlert,
+    showLiveSessionAlert,
+    showGenericErrorAlert
 } from '../view/alertView.js';
 import { renderReadoutCardShell, updateReadout } from '../view/readoutView.js';
 import { destroyCharts, renderCharts, updateChartCursors, clearChartOverlays } from '../view/chartView.js';
@@ -98,6 +101,23 @@ async function refreshCircuitImage() {
     renderCircuitImage('circuitImageContainer', imageUrl, state.currentSession?.circuit_short_name);
 }
 
+function handleOpenF1Error(err, contextMessage = '') {
+    if (!err) return;
+    const msg = (err.message || '').toLowerCase();
+    const status = err.status;
+
+    if (status === 429 || msg.includes('429')) {
+        showRateLimitAlert();
+    } else if (status === 401 || status === 403 || msg.includes('unauthorized') || msg.includes('live session')) {
+        sessionSubhead.textContent = 'OpenF1 API restricted — live session in progress';
+        showLiveSessionAlert();
+    } else {
+        const detail = err.message ? `: ${err.message}` : '';
+        sessionSubhead.textContent = contextMessage ? `${contextMessage}${detail}` : 'Unable to load data from OpenF1';
+        showGenericErrorAlert(`Unable to load data from OpenF1 (${err.message || 'Error'}). Please check your connection or try again.`);
+    }
+}
+
 async function loadSessionForSelection() {
     const year = Number(yearSelect.value);
     const circuit = circuitSelect.value;
@@ -110,18 +130,23 @@ async function loadSessionForSelection() {
     loadComparisonBtn.disabled = true;
     sessionSubhead.textContent = "Loading session...";
 
-    await setSessionKey(year, circuit);
-    updateSessionSubhead(sessionSubhead);
-    updateAlertsForSession();
+    try {
+        await setSessionKey(year, circuit);
+        updateSessionSubhead(sessionSubhead);
+        updateAlertsForSession();
 
-    const sessionDrivers = await fetchDriversForSession();
-    refreshUniqueDrivers(sessionDrivers);
-    repopulateDriverSelects();
+        const sessionDrivers = await fetchDriversForSession();
+        refreshUniqueDrivers(sessionDrivers);
+        repopulateDriverSelects();
 
-    await refreshCircuitImage();
+        await refreshCircuitImage();
 
-    driverASelect.disabled = false;
-    driverBSelect.disabled = false;
+        driverASelect.disabled = false;
+        driverBSelect.disabled = false;
+    } catch (err) {
+        console.error("Session load error:", err);
+        handleOpenF1Error(err, "Error loading session");
+    }
 }
 
 function onYearChange() {
@@ -402,16 +427,21 @@ export async function initComparisonPage() {
     wireAlertCloseButtons();
     initChartTabBars();
 
-    await loadSessionsDirectory();
+    try {
+        await loadSessionsDirectory();
 
-    populateYearSelect(yearSelect);
-    if (state.years.length > 0) {
-        yearSelect.value = state.years[0];
-        populateCircuitSelect(circuitSelect, state.years[0]);
-        if (state.circuitsByYear[state.years[0]]?.length > 0) {
-            circuitSelect.value = state.circuitsByYear[state.years[0]][0].circuit_short_name;
-            await loadSessionForSelection();
+        populateYearSelect(yearSelect);
+        if (state.years.length > 0) {
+            yearSelect.value = state.years[0];
+            populateCircuitSelect(circuitSelect, state.years[0]);
+            if (state.circuitsByYear[state.years[0]]?.length > 0) {
+                circuitSelect.value = state.circuitsByYear[state.years[0]][0].circuit_short_name;
+                await loadSessionForSelection();
+            }
         }
+    } catch (err) {
+        console.error("Failed to load sessions directory:", err);
+        handleOpenF1Error(err, "Failed to load sessions");
     }
 
     yearSelect.addEventListener('change', onYearChange);
@@ -427,19 +457,7 @@ export async function initComparisonPage() {
         loadComparisonBtn.textContent = "Loading...";
         loadComparison(numA, numB).catch(err => {
             console.error("Comparison load error:", err);
-            
-            if (err.message && err.message.includes("429")) {
-                const alertEl = document.getElementById('openf1RateLimitAlert');
-                if (alertEl) alertEl.hidden = false;
-            } else if (state.currentSession?.date_start && state.currentSession?.date_end) {
-                const now = Date.now();
-                const startMs = new Date(state.currentSession.date_start).getTime();
-                const endMs = new Date(state.currentSession.date_end).getTime();
-                if (now >= startMs && now < endMs) {
-                    const alertEl = document.getElementById('openf1LiveSessionAlert');
-                    if (alertEl) alertEl.hidden = false;
-                }
-            }
+            handleOpenF1Error(err, "Error loading comparison telemetry");
         }).finally(() => {
             loadComparisonBtn.textContent = "Load Comparison";
             validateDriverSelection();
