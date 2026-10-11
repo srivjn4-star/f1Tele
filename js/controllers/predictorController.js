@@ -184,7 +184,7 @@ function setupSelectors(yearSelect, raceSelect) {
 
         racesInYear.forEach(race => {
             const opt = document.createElement('option');
-            opt.value = race.session_key;
+            opt.value = race.round;
             opt.textContent = `Round ${race.round}: ${race.race_name}`;
             raceSelect.appendChild(opt);
         });
@@ -204,8 +204,9 @@ function setupSelectors(yearSelect, raceSelect) {
     });
 
     raceSelect.addEventListener('change', (e) => {
-        const sessionKey = parseInt(e.target.value, 10);
-        const selectedRace = allRacesData.find(r => r.session_key === sessionKey);
+        const roundNum = parseInt(e.target.value, 10);
+        const selectedYear = parseInt(yearSelect.value, 10);
+        const selectedRace = allRacesData.find(r => r.year === selectedYear && r.round === roundNum);
         if (selectedRace) {
             renderRaceStandings(selectedRace);
         }
@@ -225,7 +226,10 @@ function renderRaceStandings(race) {
 
     if (metaCard) metaCard.style.display = 'flex';
     if (raceTitle) raceTitle.textContent = `${race.year} ${race.race_name} (Round ${race.round})`;
-    if (raceCircuit) raceCircuit.textContent = `Circuit: ${race.circuit} · Session Key: ${race.session_key}`;
+    if (raceCircuit) {
+        const sessionKeyStr = race.session_key ? ` · Session Key: ${race.session_key}` : '';
+        raceCircuit.textContent = `Circuit: ${race.circuit}${sessionKeyStr}`;
+    }
 
     // Weather pills
     if (raceWeather && race.weather) {
