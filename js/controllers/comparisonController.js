@@ -26,11 +26,13 @@ import {
 import {
     hideAllSessionAlerts,
     updateAlertsForSession,
-    wireAlertCloseButtons
+    wireAlertCloseButtons,
+    showRateLimitAlert,
+    showLiveSessionAlert,
+    showGenericErrorAlert
 } from '../view/alertView.js';
-import { renderLapsTable } from '../view/lapsTableView.js';
 import { renderReadoutCardShell, updateReadout } from '../view/readoutView.js';
-import { destroyChart, renderChart } from '../view/chartView.js';
+import { destroyCharts, renderCharts, updateChartCursors, clearChartOverlays } from '../view/chartView.js';
 import {
     createCoordinateMapper,
     findBestReferenceLap,
@@ -40,7 +42,11 @@ import {
     findNearestByTime,
     findNearestCarDataPoint,
     getRaceProgress,
-    renderTrack
+    renderTrack,
+    renderScrubberWidget,
+    updateScrubberActiveDriver,
+    updateScrubberKnob,
+    getScrubberProgressFromMouse
 } from '../view/trackView.js';
 
 let yearSelect;
@@ -53,22 +59,18 @@ let driverSelectWarning;
 let lapSelect;
 
 //------------------------------------------------------------
-// CLEAR VIEW — reset chart, track, tables when session changes
+// CLEAR VIEW — reset chart, track, readouts when session changes
 //------------------------------------------------------------
 
 function clearComparisonView() {
-    destroyChart();
+    destroyCharts();
     state.carState = null;
     lapSelect.innerHTML = "";
     document.getElementById('trackContainer').innerHTML = "";
+    const scrubberSlot = document.getElementById('scrubberSlot');
+    if (scrubberSlot) scrubberSlot.innerHTML = "";
     document.getElementById('driverAReadout').innerHTML = "";
     document.getElementById('driverBReadout').innerHTML = "";
-    document.getElementById('driverATable').innerHTML = "";
-    document.getElementById('driverBTable').innerHTML = "";
-    document.getElementById('driverATableName').textContent = "Driver A";
-    document.getElementById('driverBTableName').textContent = "Driver B";
-    document.getElementById('driverADot').style.background = "";
-    document.getElementById('driverBDot').style.background = "";
 }
 
 function repopulateDriverSelects() {
@@ -99,6 +101,23 @@ async function refreshCircuitImage() {
     renderCircuitImage('circuitImageContainer', imageUrl, state.currentSession?.circuit_short_name);
 }
 
+function handleOpenF1Error(err, contextMessage = '') {
+    if (!err) return;
+    const msg = (err.message || '').toLowerCase();
+    const status = err.status;
+
+    if (status === 429 || msg.includes('429')) {
+        showRateLimitAlert();
+    } else if (status === 401 || status === 403 || msg.includes('unauthorized') || msg.includes('live session')) {
+        sessionSubhead.textContent = 'OpenF1 API restricted — live session in progress';
+        showLiveSessionAlert();
+    } else {
+        const detail = err.message ? `: ${err.message}` : '';
+        sessionSubhead.textContent = contextMessage ? `${contextMessage}${detail}` : 'Unable to load data from OpenF1';
+        showGenericErrorAlert(`Unable to load data from OpenF1 (${err.message || 'Error'}). Please check your connection or try again.`);
+    }
+}
+
 async function loadSessionForSelection() {
     const year = Number(yearSelect.value);
     const circuit = circuitSelect.value;
@@ -111,23 +130,140 @@ async function loadSessionForSelection() {
     loadComparisonBtn.disabled = true;
     sessionSubhead.textContent = "Loading session...";
 
-    await setSessionKey(year, circuit);
-    updateSessionSubhead(sessionSubhead);
-    updateAlertsForSession();
+    try {
+        await setSessionKey(year, circuit);
+        updateSessionSubhead(sessionSubhead);
+        updateAlertsForSession();
 
-    const sessionDrivers = await fetchDriversForSession();
-    refreshUniqueDrivers(sessionDrivers);
-    repopulateDriverSelects();
+        const sessionDrivers = await fetchDriversForSession();
+        refreshUniqueDrivers(sessionDrivers);
+        repopulateDriverSelects();
 
-    await refreshCircuitImage();
+        await refreshCircuitImage();
 
-    driverASelect.disabled = false;
-    driverBSelect.disabled = false;
+        driverASelect.disabled = false;
+        driverBSelect.disabled = false;
+    } catch (err) {
+        console.error("Session load error:", err);
+        handleOpenF1Error(err, "Error loading session");
+    }
 }
 
 function onYearChange() {
     populateCircuitSelect(circuitSelect, Number(yearSelect.value));
     loadSessionForSelection();
+}
+
+let activeScrubberDriver = 'a';
+let lastScrubberT = null;
+
+function syncScrubberKnobFromActiveCar() {
+    if (!state.carState) return;
+    const activeCar = state.carState[activeScrubberDriver];
+    if (!activeCar || !activeCar.sessionArray || activeCar.sessionIndex === undefined) return;
+    const curPoint = activeCar.sessionArray[activeCar.sessionIndex];
+    if (!curPoint) return;
+    const start = activeCar.lapStarts && activeCar.lapStarts[curPoint.lapIndex] !== undefined ? activeCar.lapStarts[curPoint.lapIndex] : 0;
+    const next = activeCar.lapStarts && activeCar.lapStarts[curPoint.lapIndex + 1] !== undefined ? activeCar.lapStarts[curPoint.lapIndex + 1] : activeCar.sessionArray.length;
+    const len = Math.max(1, next - start);
+    const t = Math.max(0, Math.min(1, (activeCar.sessionIndex - start) / Math.max(1, len - 1)));
+    updateScrubberKnob(t, activeCar.color);
+}
+
+function initScrubberLoopInteractions() {
+    const btnA = document.getElementById('scrubberDriverABtn');
+    const btnB = document.getElementById('scrubberDriverBBtn');
+    const svg = document.getElementById('scrubberSvg');
+    if (!btnA || !btnB || !svg) return;
+
+    btnA.onclick = (e) => {
+        e.stopPropagation();
+        activeScrubberDriver = 'a';
+        lastScrubberT = null;
+        updateScrubberActiveDriver('a', state.carState.a.color, state.carState.b.color);
+        syncScrubberKnobFromActiveCar();
+    };
+
+    btnB.onclick = (e) => {
+        e.stopPropagation();
+        activeScrubberDriver = 'b';
+        lastScrubberT = null;
+        updateScrubberActiveDriver('b', state.carState.a.color, state.carState.b.color);
+        syncScrubberKnobFromActiveCar();
+    };
+
+    let scrubbing = false;
+
+    function handleScrub(e, isInitial = false) {
+        if (!state.carState) return;
+        const rect = svg.getBoundingClientRect();
+        const mouseX = (e.clientX - rect.left) * (200 / rect.width);
+        const mouseY = (e.clientY - rect.top) * (52 / rect.height);
+        const t = getScrubberProgressFromMouse(mouseX, mouseY);
+
+        const activeCar = state.carState[activeScrubberDriver];
+        const otherCar = state.carState[activeScrubberDriver === 'a' ? 'b' : 'a'];
+        let lapIndex = Number(lapSelect.value);
+
+        // Detect lap completion when scrubbing around the loop
+        if (!isInitial && lastScrubberT !== null) {
+            if (lastScrubberT > 0.75 && t < 0.25) {
+                // Completed lap forward (clockwise)
+                if (lapIndex < activeCar.laps.length - 1) {
+                    lapIndex++;
+                    lapSelect.value = lapIndex;
+                    renderCharts(lapIndex);
+                }
+            } else if (lastScrubberT < 0.25 && t > 0.75) {
+                // Scrubbed backward (counter-clockwise)
+                if (lapIndex > 0) {
+                    lapIndex--;
+                    lapSelect.value = lapIndex;
+                    renderCharts(lapIndex);
+                }
+            }
+        }
+        lastScrubberT = t;
+
+        const start = activeCar.lapStarts && activeCar.lapStarts[lapIndex] !== undefined ? activeCar.lapStarts[lapIndex] : 0;
+        const next = activeCar.lapStarts && activeCar.lapStarts[lapIndex + 1] !== undefined ? activeCar.lapStarts[lapIndex + 1] : activeCar.sessionArray.length;
+        const lapLen = Math.max(1, next - start);
+        const targetIndex = Math.min(next - 1, start + Math.round(t * (lapLen - 1)));
+
+        const point = moveCarTo(activeCar, targetIndex);
+        const otherIndex = findNearestByTime(otherCar.sessionArray, new Date(point.date).getTime());
+        moveCarTo(otherCar, otherIndex);
+
+        updateChartCursors(state.carState.a.currentCarDataPoint, state.carState.b.currentCarDataPoint);
+        updateScrubberKnob(t, activeCar.color);
+    }
+
+    svg.addEventListener('mousedown', (e) => {
+        scrubbing = true;
+        handleScrub(e, true);
+    });
+    window.addEventListener('mouseup', () => {
+        scrubbing = false;
+        lastScrubberT = null;
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (scrubbing) handleScrub(e, false);
+    });
+}
+
+function initChartTabBars() {
+    document.querySelectorAll('.chart-tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const targetEl = document.getElementById(targetId);
+            const scrollBox = document.getElementById('chartsScrollBox');
+            if (targetEl && scrollBox) {
+                targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            document.querySelectorAll('.chart-tab-btn').forEach(b => b.classList.remove('chart-tab-btn--active'));
+            btn.classList.add('chart-tab-btn--active');
+        });
+    });
 }
 
 //------------------------------------------------------------
@@ -140,6 +276,7 @@ function moveCarTo(car, sessionIndex) {
     document.getElementById(car.circleId).setAttribute('cx', point.pixelX);
     document.getElementById(car.circleId).setAttribute('cy', point.pixelY);
     const carDataPoint = findNearestCarDataPoint(car.carData[point.lapIndex], point.date);
+    car.currentCarDataPoint = carDataPoint;
     updateReadout(car, carDataPoint);
     return point;
 }
@@ -155,11 +292,20 @@ function makeDraggable(car, otherCar) {
     window.addEventListener('mousemove', (e) => {
         if (!dragging) return;
 
-        const rect = svg.getBoundingClientRect();
-        const scaleX = svg.viewBox.baseVal.width / rect.width;
-        const scaleY = svg.viewBox.baseVal.height / rect.height;
-        const mouseX = (e.clientX - rect.left) * scaleX;
-        const mouseY = (e.clientY - rect.top) * scaleY;
+        let mouseX, mouseY;
+        const ctm = svg.getScreenCTM();
+        if (ctm && svg.createSVGPoint) {
+            const pt = svg.createSVGPoint();
+            pt.x = e.clientX;
+            pt.y = e.clientY;
+            const svgPt = pt.matrixTransform(ctm.inverse());
+            mouseX = svgPt.x;
+            mouseY = svgPt.y;
+        } else {
+            const rect = svg.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (svg.viewBox.baseVal.width / rect.width);
+            mouseY = (e.clientY - rect.top) * (svg.viewBox.baseVal.height / rect.height);
+        }
 
         const newIndex = findNearestLocalIndex(car.sessionArray, car.sessionIndex, mouseX, mouseY);
         const point = moveCarTo(car, newIndex);
@@ -173,8 +319,11 @@ function makeDraggable(car, otherCar) {
         const leadLapIndex = progressThis > progressOther ? point.lapIndex : pointOther.lapIndex;
         if (Number(lapSelect.value) !== leadLapIndex) {
             lapSelect.value = leadLapIndex;
-            renderChart(leadLapIndex);
+            renderCharts(leadLapIndex);
         }
+
+        updateChartCursors(state.carState.a.currentCarDataPoint, state.carState.b.currentCarDataPoint);
+        syncScrubberKnobFromActiveCar();
     });
 }
 
@@ -182,14 +331,10 @@ function makeDraggable(car, otherCar) {
 // LOAD COMPARISON — runs once per "Load Comparison" click
 //------------------------------------------------------------
 
-async function buildDriverState(driverNumber, circleId, readoutId, tableId, tableNameId, dotId) {
+async function buildDriverState(driverNumber, circleId, readoutId) {
     const info = findDriverInfo(driverNumber);
     const color = `#${info.team_colour}`;
     const laps = await getLaps(driverNumber);
-
-    document.getElementById(tableNameId).textContent = info.full_name;
-    document.getElementById(dotId).style.background = color;
-    renderLapsTable(laps, document.getElementById(tableId));
 
     const carData = await carDataReadyForChart(driverNumber, laps);
     const locationData = await carLocationDataReadyForChart(driverNumber, laps);
@@ -198,8 +343,8 @@ async function buildDriverState(driverNumber, circleId, readoutId, tableId, tabl
 }
 
 async function loadComparison(driverNumA, driverNumB) {
-    const a = await buildDriverState(driverNumA, 'driverACarMarker', 'driverAReadout', 'driverATable', 'driverATableName', 'driverADot');
-    const b = await buildDriverState(driverNumB, 'driverBCarMarker', 'driverBReadout', 'driverBTable', 'driverBTableName', 'driverBDot');
+    const a = await buildDriverState(driverNumA, 'driverACarMarker', 'driverAReadout');
+    const b = await buildDriverState(driverNumB, 'driverBCarMarker', 'driverBReadout');
 
     state.carState = { a, b };
 
@@ -210,7 +355,7 @@ async function loadComparison(driverNumA, driverNumB) {
         option.textContent = `Lap ${lap.lap_number}`;
         lapSelect.appendChild(option);
     });
-    renderChart(0);
+    renderCharts(0);
 
     const referenceLap = findBestReferenceLap(a.laps, a.locationData, b.laps, b.locationData);
     const toPixel = createCoordinateMapper(referenceLap.points, 800, 500);
@@ -222,6 +367,8 @@ async function loadComparison(driverNumA, driverNumB) {
     b.sessionIndex = 0;
     const aLapStarts = buildLapStartIndex(a.sessionArray);
     const bLapStarts = buildLapStartIndex(b.sessionArray);
+    a.lapStarts = aLapStarts;
+    b.lapStarts = bLapStarts;
 
     const aStartIndex = aLapStarts.find(idx => idx !== undefined);
     const bStartIndex = bLapStarts.find(idx => idx !== undefined);
@@ -229,15 +376,24 @@ async function loadComparison(driverNumA, driverNumB) {
     const bStartPixel = b.sessionArray[bStartIndex];
 
     renderTrack('trackContainer', trackPoints, aStartPixel, bStartPixel, referenceLap.lap);
+    renderScrubberWidget('scrubberSlot', a, b, activeScrubberDriver);
+    initScrubberLoopInteractions();
+
     renderReadoutCardShell(a);
     renderReadoutCardShell(b);
+
+    if (aStartIndex !== undefined) moveCarTo(a, aStartIndex);
+    if (bStartIndex !== undefined) moveCarTo(b, bStartIndex);
+    updateChartCursors(a.currentCarDataPoint, b.currentCarDataPoint);
+    syncScrubberKnobFromActiveCar();
 
     makeDraggable(a, b);
     makeDraggable(b, a);
 
     lapSelect.onchange = () => {
         const lapIndex = Number(lapSelect.value);
-        renderChart(lapIndex);
+        lastScrubberT = null;
+        renderCharts(lapIndex);
 
         const aLapStartTime = a.laps[lapIndex] ? new Date(a.laps[lapIndex].date_start).getTime() : Infinity;
         const bLapStartTime = b.laps[lapIndex] ? new Date(b.laps[lapIndex].date_start).getTime() : Infinity;
@@ -249,6 +405,8 @@ async function loadComparison(driverNumA, driverNumB) {
             moveCarTo(b, bLapStarts[lapIndex]);
             moveCarTo(a, findNearestByTime(a.sessionArray, bLapStartTime));
         }
+        updateChartCursors(a.currentCarDataPoint, b.currentCarDataPoint);
+        syncScrubberKnobFromActiveCar();
     };
 }
 
@@ -267,17 +425,23 @@ export async function initComparisonPage() {
     lapSelect = document.getElementById('lapSelect');
 
     wireAlertCloseButtons();
+    initChartTabBars();
 
-    await loadSessionsDirectory();
+    try {
+        await loadSessionsDirectory();
 
-    populateYearSelect(yearSelect);
-    if (state.years.length > 0) {
-        yearSelect.value = state.years[0];
-        populateCircuitSelect(circuitSelect, state.years[0]);
-        if (state.circuitsByYear[state.years[0]]?.length > 0) {
-            circuitSelect.value = state.circuitsByYear[state.years[0]][0].circuit_short_name;
-            await loadSessionForSelection();
+        populateYearSelect(yearSelect);
+        if (state.years.length > 0) {
+            yearSelect.value = state.years[0];
+            populateCircuitSelect(circuitSelect, state.years[0]);
+            if (state.circuitsByYear[state.years[0]]?.length > 0) {
+                circuitSelect.value = state.circuitsByYear[state.years[0]][0].circuit_short_name;
+                await loadSessionForSelection();
+            }
         }
+    } catch (err) {
+        console.error("Failed to load sessions directory:", err);
+        handleOpenF1Error(err, "Failed to load sessions");
     }
 
     yearSelect.addEventListener('change', onYearChange);
@@ -293,19 +457,7 @@ export async function initComparisonPage() {
         loadComparisonBtn.textContent = "Loading...";
         loadComparison(numA, numB).catch(err => {
             console.error("Comparison load error:", err);
-            
-            if (err.message && err.message.includes("429")) {
-                const alertEl = document.getElementById('openf1RateLimitAlert');
-                if (alertEl) alertEl.hidden = false;
-            } else if (state.currentSession?.date_start && state.currentSession?.date_end) {
-                const now = Date.now();
-                const startMs = new Date(state.currentSession.date_start).getTime();
-                const endMs = new Date(state.currentSession.date_end).getTime();
-                if (now >= startMs && now < endMs) {
-                    const alertEl = document.getElementById('openf1LiveSessionAlert');
-                    if (alertEl) alertEl.hidden = false;
-                }
-            }
+            handleOpenF1Error(err, "Error loading comparison telemetry");
         }).finally(() => {
             loadComparisonBtn.textContent = "Load Comparison";
             validateDriverSelection();

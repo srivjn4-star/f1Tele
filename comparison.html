@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -61,49 +63,81 @@
         <section class="chart-section">
             <div class="section-label">
                 <span class="section-index">01</span>
-                <h2>Corner-by-corner speed</h2>
+                <h2>Corner-by-corner telemetry</h2>
             </div>
 
             <div id="circuitImageContainer" class="circuit-image-wrap"></div>
 
-            <div class="chart-track-row">
-                <div class="chart-wrap">
+            <!-- Main Telemetry Stage: Left (Driver A + Loop), Center (Circuit Map), Right (Driver B) -->
+            <div class="telemetry-stage-row">
+                <!-- Left Wing: Driver A readout + Loop at bottom -->
+                <div class="stage-wing stage-wing--left">
+                    <div id="driverAReadout" class="driver-readout-card"></div>
+                    <div id="scrubberSlot" class="scrubber-slot"></div>
+                </div>
+
+                <!-- Center: Track Map -->
+                <div class="track-center-box">
+                    <div class="track-header">
+                        <span class="track-title">Circuit Map</span>
+                    </div>
+                    <div id="trackContainer" class="track-wrap">
+                        <!-- Track SVG rendered here -->
+                    </div>
+                </div>
+
+                <!-- Right Wing: Driver B readout -->
+                <div class="stage-wing stage-wing--right">
+                    <div id="driverBReadout" class="driver-readout-card"></div>
+                </div>
+            </div>
+
+            <!-- Full-Width Charts Viewer Box (under track) -->
+            <div class="charts-viewer-box">
+                <div class="charts-viewer-header">
+                    <div class="chart-tab-bar">
+                        <button type="button" class="chart-tab-btn chart-tab-btn--active" data-target="speedTile">01 SPEED</button>
+                        <button type="button" class="chart-tab-btn" data-target="throttleTile">02 THROTTLE</button>
+                        <button type="button" class="chart-tab-btn" data-target="brakeTile">03 BRAKING</button>
+                    </div>
                     <div class="lap-picker">
                         <label for="lapSelect">LAP</label>
                         <select id="lapSelect"></select>
                     </div>
-                    <canvas id="speedChart"></canvas>
                 </div>
 
-                <div id="trackContainer" class="track-wrap"></div>
-            </div>
-
-            <div class="readout-row">
-                <div id="driverAReadout" class="driver-readout-card"></div>
-                <div id="driverBReadout" class="driver-readout-card"></div>
-            </div>
-        </section>
-
-        <div class="sector-rule sector-rule--thin" aria-hidden="true"></div>
-
-        <section class="laps-section">
-            <div class="section-label">
-                <span class="section-index">02</span>
-                <h2>Lap data</h2>
-            </div>
-
-            <div class="tables-grid">
-                <div class="driver-table">
-                    <h3><span class="driver-dot" id="driverADot"></span><span id="driverATableName">Driver A</span></h3>
-                    <div class="table-scroll">
-                        <table id="driverATable"></table>
+                <div id="chartsScrollBox" class="charts-scroll-box">
+                    <!-- Chart 1: Speed -->
+                    <div id="speedTile" class="chart-tile-full">
+                        <div class="tile-bar">
+                            <span class="tile-title">Speed (km/h)</span>
+                        </div>
+                        <div class="chart-canvas-wrap">
+                            <canvas id="speedChart"></canvas>
+                            <canvas id="speedOverlay" class="chart-overlay"></canvas>
+                        </div>
                     </div>
-                </div>
 
-                <div class="driver-table">
-                    <h3><span class="driver-dot" id="driverBDot"></span><span id="driverBTableName">Driver B</span></h3>
-                    <div class="table-scroll">
-                        <table id="driverBTable"></table>
+                    <!-- Chart 2: Throttle -->
+                    <div id="throttleTile" class="chart-tile-full">
+                        <div class="tile-bar">
+                            <span class="tile-title">Throttle (%)</span>
+                        </div>
+                        <div class="chart-canvas-wrap">
+                            <canvas id="throttleChart"></canvas>
+                            <canvas id="throttleOverlay" class="chart-overlay"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Chart 3: Braking Swimlane -->
+                    <div id="brakeTile" class="chart-tile-full">
+                        <div class="tile-bar">
+                            <span class="tile-title">Braking Swimlane (Zones)</span>
+                        </div>
+                        <div class="chart-canvas-wrap">
+                            <canvas id="brakeChart"></canvas>
+                            <canvas id="brakeOverlay" class="chart-overlay"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -129,6 +163,10 @@
         </div>
         <div id="openf1LiveSessionAlert" class="alert-cube alert-cube--error" hidden>
             <p class="alert-cube__text">This session is currently live. OpenF1 does not allow fetching telemetry for live sessions without authentication.</p>
+            <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
+        </div>
+        <div id="openf1GenericErrorAlert" class="alert-cube alert-cube--error" hidden>
+            <p id="openf1GenericErrorText" class="alert-cube__text">Unable to load data from OpenF1 at the moment. Please check your connection or try again.</p>
             <button type="button" class="alert-cube__close" aria-label="Dismiss alert">&times;</button>
         </div>
     </div>

@@ -12,12 +12,30 @@ const SESSION_ALERT_IDS = [
 
 export function hideAllSessionAlerts() {
     SESSION_ALERT_IDS.forEach(id => {
-        document.getElementById(id).hidden = true;
+        const el = document.getElementById(id);
+        if (el) el.hidden = true;
     });
 }
 
 export function showSessionAlert(alertId) {
-    document.getElementById(alertId).hidden = false;
+    const el = document.getElementById(alertId);
+    if (el) el.hidden = false;
+}
+
+export function showRateLimitAlert() {
+    showSessionAlert('openf1RateLimitAlert');
+}
+
+export function showLiveSessionAlert() {
+    showSessionAlert('openf1LiveSessionAlert');
+}
+
+export function showGenericErrorAlert(message) {
+    if (message) {
+        const textEl = document.getElementById('openf1GenericErrorText');
+        if (textEl) textEl.textContent = message;
+    }
+    showSessionAlert('openf1GenericErrorAlert');
 }
 
 // Shows exactly one alert based on date_start / date_end vs now (mutually exclusive).

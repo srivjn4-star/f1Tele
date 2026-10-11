@@ -16,7 +16,10 @@ function getDriversUrl() {
 }
 
 export async function loadSessionsDirectory() {
-    const sessions = await fetchWithRetry(SESSIONS_URL, 'sessions') ?? [];
+    const sessions = await fetchWithRetry(SESSIONS_URL, 'sessions');
+    if (!sessions || !Array.isArray(sessions) || sessions.length === 0) {
+        throw new Error('No sessions available from OpenF1 (Live session or API restricted)');
+    }
 
     state.years.length = 0;
     state.circuitsByYear = {};
