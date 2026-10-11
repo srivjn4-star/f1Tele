@@ -6,6 +6,8 @@ export const state = {
     sessionKey: 0,
     currentSession: null,
     speedChart: null,
+    throttleChart: null,
+    brakeChart: null,
     carState: null,
     uniqueDrivers: [],
     years: [],
