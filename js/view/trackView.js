@@ -4,7 +4,7 @@
 
 import { state } from '../model/state.js';
 
-export function createCoordinateMapper(allPoints, canvasWidth, canvasHeight, padding = 20) {
+export function createCoordinateMapper(allPoints, canvasWidth, canvasHeight, padding = 25) {
     const xs = allPoints.map(p => p.x);
     const ys = allPoints.map(p => p.y);
     const minX = Math.min(...xs);
@@ -13,15 +13,46 @@ export function createCoordinateMapper(allPoints, canvasWidth, canvasHeight, pad
     const maxY = Math.max(...ys);
     const dataWidth = maxX - minX;
     const dataHeight = maxY - minY;
+
+    // Check if circuit is very large vertically (height > width * 1.15)
+    const shouldRotate = dataHeight > dataWidth * 1.15;
     const usableWidth = canvasWidth - padding * 2;
     const usableHeight = canvasHeight - padding * 2;
-    const scale = Math.min(usableWidth / dataWidth, usableHeight / dataHeight);
-    return function toPixel(point) {
-        return {
-            pixelX: (point.x - minX) * scale + padding,
-            pixelY: (point.y - minY) * scale + padding
+
+    if (shouldRotate) {
+        // Rotate 90 degrees clockwise: (x, y) -> (y, -x)
+        const rxs = allPoints.map(p => p.y);
+        const rys = allPoints.map(p => -p.x);
+        const minRX = Math.min(...rxs);
+        const maxRX = Math.max(...rxs);
+        const minRY = Math.min(...rys);
+        const maxRY = Math.max(...rys);
+        const rWidth = maxRX - minRX;
+        const rHeight = maxRY - minRY;
+        const scale = Math.min(usableWidth / rWidth, usableHeight / rHeight);
+        const offsetX = (usableWidth - rWidth * scale) / 2 + padding;
+        const offsetY = (usableHeight - rHeight * scale) / 2 + padding;
+
+        return function toPixel(point) {
+            const rx = point.y;
+            const ry = -point.x;
+            return {
+                pixelX: (rx - minRX) * scale + offsetX,
+                pixelY: (ry - minRY) * scale + offsetY
+            };
         };
-    };
+    } else {
+        const scale = Math.min(usableWidth / dataWidth, usableHeight / dataHeight);
+        const offsetX = (usableWidth - dataWidth * scale) / 2 + padding;
+        const offsetY = (usableHeight - dataHeight * scale) / 2 + padding;
+
+        return function toPixel(point) {
+            return {
+                pixelX: (point.x - minX) * scale + offsetX,
+                pixelY: (point.y - minY) * scale + offsetY
+            };
+        };
+    }
 }
 
 export function findBestReferenceLap(driverALaps, driverALocation, driverBLaps, driverBLocation) {
@@ -148,17 +179,18 @@ export function buildLapStartIndex(sessionArray) {
     return starts;
 }
 
-export function findNearestLocalIndex(sessionArray, centerIndex, mouseX, mouseY, window = 50) {
+export function findNearestLocalIndex(sessionArray, centerIndex, mouseX, mouseY, window = 25) {
     const start = Math.max(0, centerIndex - window);
     const end = Math.min(sessionArray.length - 1, centerIndex + window);
     let nearestIndex = centerIndex;
-    let nearestDistSq = Infinity;
+    let nearestScore = Infinity;
     for (let i = start; i <= end; i++) {
         const dx = sessionArray[i].pixelX - mouseX;
         const dy = sessionArray[i].pixelY - mouseY;
         const distSq = dx * dx + dy * dy;
-        if (distSq < nearestDistSq) {
-            nearestDistSq = distSq;
+        const score = distSq + Math.abs(i - centerIndex) * 1.5;
+        if (score < nearestScore) {
+            nearestScore = score;
             nearestIndex = i;
         }
     }
@@ -230,4 +262,144 @@ export function renderTrack(containerId, trackPixelPoints, aPixel, bPixel, refer
             <circle id="driverBCarMarker" cx="${bPixel.pixelX}" cy="${bPixel.pixelY}" r="8" fill="${state.carState.b.color}" />
         </svg>
     `;
+}
+
+// Stadium Loop geometry constants
+const LOOP_W = 200;
+const LOOP_H = 52;
+const LOOP_R = 21;
+const LOOP_L = 148; // 174 - 26
+const LOOP_PERIMETER = 2 * LOOP_L + 2 * Math.PI * LOOP_R; // ~427.95
+
+export function getScrubberPoint(progress) {
+    const p = Math.max(0, Math.min(1, progress));
+    const s = p * LOOP_PERIMETER;
+    const arcLen = Math.PI * LOOP_R;
+
+    if (s <= LOOP_L) {
+        // Top straight (left to right)
+        return { x: 26 + s, y: 5 };
+    } else if (s <= LOOP_L + arcLen) {
+        // Right semicircle (top to bottom)
+        const angle = -Math.PI / 2 + (s - LOOP_L) / LOOP_R;
+        return {
+            x: 174 + LOOP_R * Math.cos(angle),
+            y: 26 + LOOP_R * Math.sin(angle)
+        };
+    } else if (s <= 2 * LOOP_L + arcLen) {
+        // Bottom straight (right to left)
+        const ds = s - (LOOP_L + arcLen);
+        return { x: 174 - ds, y: 47 };
+    } else {
+        // Left semicircle (bottom to top)
+        const ds = s - (2 * LOOP_L + arcLen);
+        const angle = Math.PI / 2 + ds / LOOP_R;
+        return {
+            x: 26 + LOOP_R * Math.cos(angle),
+            y: 26 + LOOP_R * Math.sin(angle)
+        };
+    }
+}
+
+export function getScrubberProgressFromMouse(mx, my) {
+    const arcLen = Math.PI * LOOP_R;
+    let s = 0;
+
+    if (mx < 26) {
+        // Left semicircle
+        let angle = Math.atan2(my - 26, mx - 26);
+        let a = angle - Math.PI / 2;
+        if (a < 0) a += 2 * Math.PI;
+        if (a > Math.PI) a = Math.PI;
+        s = 2 * LOOP_L + arcLen + (a * LOOP_R);
+    } else if (mx > 174) {
+        // Right semicircle
+        let angle = Math.atan2(my - 26, mx - 174);
+        let a = angle - (-Math.PI / 2);
+        if (a < 0) a += 2 * Math.PI;
+        if (a > Math.PI) a = Math.PI;
+        s = LOOP_L + (a * LOOP_R);
+    } else {
+        // Straight sections (26 <= mx <= 174)
+        if (my <= 26) {
+            s = mx - 26;
+        } else {
+            s = LOOP_L + arcLen + (174 - mx);
+        }
+    }
+
+    return Math.max(0, Math.min(1, s / LOOP_PERIMETER));
+}
+
+export function renderScrubberWidget(containerId, driverA, driverB, activeDriver = 'a') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const existing = container.querySelector('.scrubber-loop-wrap');
+    if (existing) existing.remove();
+
+    const acronymA = driverA.info.name_acronym || driverA.info.last_name?.slice(0, 3)?.toUpperCase() || 'DRV A';
+    const acronymB = driverB.info.name_acronym || driverB.info.last_name?.slice(0, 3)?.toUpperCase() || 'DRV B';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'scrubber-loop-wrap';
+    wrap.id = 'scrubberLoopWrap';
+
+    const initialPoint = getScrubberPoint(0);
+    const activeColor = activeDriver === 'a' ? driverA.color : driverB.color;
+
+    wrap.innerHTML = `
+        <div class="scrubber-svg-container">
+            <svg viewBox="0 0 200 52" id="scrubberSvg">
+                <path d="M 26 5 L 174 5 A 21 21 0 0 1 174 47 L 26 47 A 21 21 0 0 1 26 5 Z" stroke="#16161b" stroke-width="12" fill="none" stroke-linecap="round" />
+                <path d="M 26 5 L 174 5 A 21 21 0 0 1 174 47 L 26 47 A 21 21 0 0 1 26 5 Z" stroke="#2c2c36" stroke-width="5" fill="none" stroke-linecap="round" />
+                <!-- Forward direction flow arrows -->
+                <polygon points="106,2 112,5 106,8" fill="#ffb800" opacity="0.85" />
+                <polygon points="94,44 88,47 94,50" fill="#ffb800" opacity="0.85" />
+                <circle id="scrubberKnob" cx="${initialPoint.x}" cy="${initialPoint.y}" r="8" fill="${activeColor}" stroke="#ffffff" stroke-width="2" />
+            </svg>
+            <div class="scrubber-center-ctrls">
+                <button type="button" id="scrubberDriverABtn" class="loop-driver-btn ${activeDriver === 'a' ? 'loop-driver-btn--active' : ''}">${acronymA}</button>
+                <button type="button" id="scrubberDriverBBtn" class="loop-driver-btn ${activeDriver === 'b' ? 'loop-driver-btn--active' : ''}">${acronymB}</button>
+            </div>
+        </div>
+    `;
+
+    container.appendChild(wrap);
+    updateScrubberActiveDriver(activeDriver, driverA.color, driverB.color);
+}
+
+export function updateScrubberActiveDriver(activeDriver, colorA, colorB) {
+    const btnA = document.getElementById('scrubberDriverABtn');
+    const btnB = document.getElementById('scrubberDriverBBtn');
+    const knob = document.getElementById('scrubberKnob');
+
+    if (btnA && btnB) {
+        if (activeDriver === 'a') {
+            btnA.classList.add('loop-driver-btn--active');
+            btnA.style.background = colorA;
+            btnA.style.color = '#000';
+            btnB.classList.remove('loop-driver-btn--active');
+            btnB.style.background = 'transparent';
+            btnB.style.color = '#8a8a90';
+            if (knob) knob.setAttribute('fill', colorA);
+        } else {
+            btnB.classList.add('loop-driver-btn--active');
+            btnB.style.background = colorB;
+            btnB.style.color = '#000';
+            btnA.classList.remove('loop-driver-btn--active');
+            btnA.style.background = 'transparent';
+            btnA.style.color = '#8a8a90';
+            if (knob) knob.setAttribute('fill', colorB);
+        }
+    }
+}
+
+export function updateScrubberKnob(progress, color) {
+    const knob = document.getElementById('scrubberKnob');
+    if (!knob) return;
+    const pt = getScrubberPoint(progress);
+    knob.setAttribute('cx', pt.x);
+    knob.setAttribute('cy', pt.y);
+    if (color) knob.setAttribute('fill', color);
 }
